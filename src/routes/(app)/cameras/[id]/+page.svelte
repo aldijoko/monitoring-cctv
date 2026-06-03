@@ -8,12 +8,12 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StreamPlayer from '$lib/components/StreamPlayer.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import type { Camera } from '$lib/types/live';
+	import type { LiveCamera } from '$lib/types/api';
 	import type { Recording } from '$lib/types/api';
 
 	const cameraId = $derived(page.params.id);
 
-	let camera = $state<Camera | null>(null);
+	let camera = $state<LiveCamera | null>(null);
 	let recordings = $state<Recording[]>([]);
 	let loading = $state(true);
 	let liveHlsUrl = $state<string | null>(null);
@@ -22,7 +22,7 @@
 	async function load() {
 		loading = true;
 		try {
-			const res = await api.get<{ camera: Camera }>(`/api/v1/cameras/${cameraId}`);
+			const res = await api.get<{ camera: LiveCamera }>(`/api/v1/cameras/${cameraId}`);
 			camera = res.camera;
 			const recRes = await api.get<{ recordings: Recording[] }>(
 				`/api/v1/cameras/${cameraId}/recordings?limit=20`
@@ -125,7 +125,7 @@
 	<div class="grid gap-6 lg:grid-cols-3">
 		<div class="lg:col-span-2 space-y-4">
 			<div class="flex items-center gap-2">
-				<StatusBadge variant={statusVariant} label={statusLabel} />
+				<StatusBadge status={statusVariant} label={statusLabel} />
 				<button
 					onclick={refreshStream}
 					class="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
@@ -182,7 +182,7 @@
 							</div>
 							<div class="mt-1 flex items-center justify-between text-sm">
 								<span class="font-medium text-gray-900">{formatDuration(rec.duration_seconds)}</span>
-								<StatusBadge variant="muted" label={rec.storage_path ? 'Selesai' : '—'} />
+								<StatusBadge status="muted" label={rec.storage_path ? 'Selesai' : '—'} />
 							</div>
 						</a>
 					{/each}

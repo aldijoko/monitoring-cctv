@@ -1,8 +1,10 @@
-import type { Camera } from '$lib/types';
+import type { LiveCamera } from '$lib/types/api';
 
 const now = () => new Date().toISOString();
 
-export const mockCameras: Camera[] = [
+export const delay = (ms = 300) => new Promise<void>((r) => setTimeout(r, ms));
+
+export const mockCameras: LiveCamera[] = [
 	{
 		id: 1,
 		edge_id: 1,

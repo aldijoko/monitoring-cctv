@@ -16,6 +16,7 @@ function seed(): Edge[] {
 	return [
 		{
 			id: 1,
+			tenant_id: 1,
 			code: 'KPL-119',
 			name: 'Pelni Pusat - Lobby Utama',
 			hostname: 'cctv-pusat-01',
@@ -26,6 +27,7 @@ function seed(): Edge[] {
 		},
 		{
 			id: 2,
+			tenant_id: 1,
 			code: 'KPL-204',
 			name: 'Pelni Pusat - Parkiran Timur',
 			hostname: 'cctv-pusat-02',
@@ -36,6 +38,7 @@ function seed(): Edge[] {
 		},
 		{
 			id: 3,
+			tenant_id: 1,
 			code: 'KPL-318',
 			name: 'Cabang Surabaya - Pintu Masuk',
 			hostname: 'cctv-sby-01',
@@ -46,6 +49,7 @@ function seed(): Edge[] {
 		},
 		{
 			id: 4,
+			tenant_id: 1,
 			code: 'KPL-401',
 			name: 'Cabang Makassar - Gudang',
 			hostname: 'cctv-mks-01',
@@ -56,6 +60,7 @@ function seed(): Edge[] {
 		},
 		{
 			id: 5,
+			tenant_id: 1,
 			code: 'KPL-512',
 			name: 'Pelni Pusat - Ruang Server',
 			hostname: 'cctv-pusat-03',
@@ -111,7 +116,7 @@ export interface ListParams {
 	status?: Edge['status'] | 'all';
 	limit?: number;
 	offset?: number;
-	sort?: 'code' | 'name' | 'status' | 'created_at';
+	sort?: 'code' | 'name' | 'status' | 'created_at' | 'last_heartbeat';
 	order?: 'asc' | 'desc';
 }
 

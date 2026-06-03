@@ -6,9 +6,9 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import type { Camera, CameraStatus } from '$lib/types/live';
+	import type { LiveCamera, CameraStatus } from '$lib/types/api';
 
-	let cameras = $state<Camera[]>([]);
+	let cameras = $state<LiveCamera[]>([]);
 	let loading = $state(true);
 	let search = $state('');
 	let filterStatus = $state<'' | CameraStatus>('');
@@ -25,7 +25,7 @@
 		}
 	}
 
-	async function toggleActive(camera: Camera) {
+	async function toggleActive(camera: LiveCamera) {
 		try {
 			await updateCamera(camera.id, { enabled: !camera.enabled });
 			toast.success(
@@ -37,7 +37,7 @@
 		}
 	}
 
-	async function remove(camera: Camera) {
+	async function remove(camera: LiveCamera) {
 		if (!confirm(`Hapus kamera ${camera.name}?`)) return;
 		try {
 			await deleteCamera(camera.id);

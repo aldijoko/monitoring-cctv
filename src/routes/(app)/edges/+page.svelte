@@ -23,10 +23,20 @@
 	const pageSize = 10;
 	let page = $state(1);
 
+	type SortKey = 'code' | 'name' | 'status' | 'last_heartbeat' | 'created_at';
+	let sortKey = $state<SortKey>('created_at');
+	let sortOrder = $state<'asc' | 'desc'>('desc');
+
 	let formOpen = $state(false);
 	let editingEdge = $state<Edge | null>(null);
 	let deletingEdge = $state<Edge | null>(null);
 	let deleteLoading = $state(false);
+
+	let selected = $state<Set<number>>(new Set());
+	let bulkDeleting = $state(false);
+	let bulkConfirmOpen = $state(false);
+	let copiedId = $state<number | null>(null);
+	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 	const offset = $derived((page - 1) * pageSize);
@@ -39,11 +49,12 @@
 				status: statusFilter,
 				limit: pageSize,
 				offset,
-				sort: 'created_at',
-				order: 'desc'
+				sort: sortKey,
+				order: sortOrder
 			});
 			items = res.items;
 			total = res.total;
+			selected = new Set([...selected].filter((id) => items.some((e) => e.id === id)));
 		} catch (err) {
 			toast.error('Gagal memuat data edge');
 			console.error(err);
@@ -51,6 +62,16 @@
 			loading = false;
 		}
 	}
+
+	$effect(() => {
+		// re-fetch when filters / sort / page change
+		void search;
+		void statusFilter;
+		void sortKey;
+		void sortOrder;
+		void page;
+		load();
+	});
 
 	function resetPage() {
 		page = 1;
@@ -64,6 +85,94 @@
 	function onStatusChange(e: Event) {
 		statusFilter = (e.currentTarget as HTMLSelectElement).value as StatusFilter;
 		resetPage();
+	}
+
+	function onSortChange(key: SortKey) {
+		if (sortKey === key) {
+			sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortKey = key;
+			sortOrder = key === 'name' || key === 'code' ? 'asc' : 'desc';
+		}
+		resetPage();
+	}
+
+	const allSelected = $derived(items.length > 0 && items.every((e) => selected.has(e.id)));
+	const someSelected = $derived(selected.size > 0);
+
+	function toggleAll() {
+		if (allSelected) {
+			items.forEach((e) => selected.delete(e.id));
+		} else {
+			items.forEach((e) => selected.add(e.id));
+		}
+		selected = new Set(selected);
+	}
+
+	function toggleOne(id: number) {
+		if (selected.has(id)) {
+			selected.delete(id);
+		} else {
+			selected.add(id);
+		}
+		selected = new Set(selected);
+	}
+
+	async function confirmBulkDelete() {
+		bulkDeleting = true;
+		try {
+			const ids = [...selected];
+			let ok = 0;
+			for (const id of ids) {
+				try {
+					await edgesApi.remove(id);
+					ok++;
+				} catch (err) {
+					console.error(err);
+				}
+			}
+			toast.success(`${ok} edge dihapus`);
+			bulkConfirmOpen = false;
+			selected = new Set();
+			await load();
+		} finally {
+			bulkDeleting = false;
+		}
+	}
+
+	async function copyCode(edge: Edge) {
+		try {
+			await navigator.clipboard.writeText(edge.code);
+			copiedId = edge.id;
+			toast.success(`Kode ${edge.code} disalin`);
+			if (copyTimeout) clearTimeout(copyTimeout);
+			copyTimeout = setTimeout(() => {
+				copiedId = null;
+			}, 1500);
+		} catch (err) {
+			toast.error('Gagal menyalin kode');
+			console.error(err);
+		}
+	}
+
+	function heartbeatAge(iso?: string): number | null {
+		if (!iso) return null;
+		return Date.now() - new Date(iso).getTime();
+	}
+
+	function freshnessColor(ageMs: number | null): string {
+		if (ageMs === null) return 'bg-gray-400';
+		if (ageMs < 5 * 60_000) return 'bg-green-500';
+		if (ageMs < 30 * 60_000) return 'bg-yellow-500';
+		return 'bg-red-500';
+	}
+
+	function freshnessLabel(ageMs: number | null): string {
+		if (ageMs === null) return 'Belum pernah heartbeat';
+		if (ageMs < 60_000) return 'Baru saja';
+		if (ageMs < 5 * 60_000) return 'Aktif';
+		if (ageMs < 30 * 60_000) return 'Perlu perhatian';
+		return 'Tidak aktif';
 	}
 
 	function openCreate() {
@@ -137,6 +246,14 @@
 		const day = Math.floor(hr / 24);
 		return `${day} hari lalu`;
 	}
+
+	type SortableKey = Exclude<SortKey, 'status'>;
+	const columns: { key: SortableKey; label: string; align?: 'left' | 'right' }[] = [
+		{ key: 'code', label: 'Kode' },
+		{ key: 'name', label: 'Nama / Hostname' },
+		{ key: 'last_heartbeat', label: 'Last Heartbeat' },
+		{ key: 'created_at', label: 'Dibuat' }
+	];
 </script>
 
 <svelte:head>
@@ -145,6 +262,22 @@
 
 <PageHeader title="Edges" description="Daftar node CCTV yang terdaftar di sistem">
 	{#snippet actions()}
+		<Button variant="secondary" onclick={() => load()} disabled={loading}>
+			<svg
+				class="h-4 w-4 {loading ? 'animate-spin' : ''}"
+				fill="none"
+				stroke="currentColor"
+				viewBox="0 0 24 24"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+				/>
+			</svg>
+			Refresh
+		</Button>
 		<Button onclick={openCreate}>
 			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -182,6 +315,37 @@
 		</div>
 	</div>
 
+	{#if someSelected}
+		<div
+			class="flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2"
+			role="region"
+			aria-label="Bulk actions"
+		>
+			<div class="text-sm text-indigo-900">
+				<span class="font-medium">{selected.size}</span> dipilih
+			</div>
+			<div class="flex items-center gap-2">
+				<button
+					type="button"
+					class="rounded-md px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+					onclick={() => {
+						selected = new Set();
+					}}
+				>
+					Batal
+				</button>
+				<button
+					type="button"
+					class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+					disabled={bulkDeleting}
+					onclick={() => (bulkConfirmOpen = true)}
+				>
+					Hapus {selected.size}
+				</button>
+			</div>
+		</div>
+	{/if}
+
 	<div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
 		{#if !loading && items.length === 0}
 			<EmptyState
@@ -201,25 +365,128 @@
 				<table class="w-full text-sm">
 					<thead class="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
 						<tr>
-							<th class="px-4 py-3">Kode</th>
-							<th class="px-4 py-3">Nama / Hostname</th>
-							<th class="px-4 py-3">IP Address</th>
+							<th class="w-10 px-4 py-3">
+								<input
+									type="checkbox"
+									class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+									checked={allSelected}
+									indeterminate={!allSelected && someSelected}
+									onchange={toggleAll}
+									aria-label="Pilih semua di halaman ini"
+								/>
+							</th>
+							{#each columns as col (col.key)}
+								<th class="px-4 py-3 {col.align === 'right' ? 'text-right' : ''}">
+									<button
+										type="button"
+										class="inline-flex items-center gap-1 font-medium uppercase tracking-wide text-gray-500 hover:text-gray-700"
+										onclick={() => onSortChange(col.key)}
+									>
+										{col.label}
+										{#if sortKey === col.key}
+											<svg
+												class="h-3 w-3"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												{#if sortOrder === 'asc'}
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M5 15l7-7 7 7"
+													/>
+												{:else}
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M19 9l-7 7-7-7"
+													/>
+												{/if}
+											</svg>
+										{:else}
+											<svg
+												class="h-3 w-3 text-gray-300"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M8 9l4-4 4 4m0 6l-4 4-4-4"
+												/>
+											</svg>
+										{/if}
+									</button>
+								</th>
+							{/each}
 							<th class="px-4 py-3">Status</th>
-							<th class="px-4 py-3">Last Heartbeat</th>
-							<th class="px-4 py-3">Dibuat</th>
 							<th class="px-4 py-3 text-right">Aksi</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-100">
 						{#each items as e (e.id)}
-							<tr class="hover:bg-gray-50">
+							{@const age = heartbeatAge(e.last_heartbeat)}
+							<tr class="hover:bg-gray-50" class:bg-indigo-50={selected.has(e.id)}>
 								<td class="px-4 py-3">
-									<a
-										href="/edges/{e.id}"
-										class="font-mono text-sm font-medium text-indigo-600 hover:underline"
-									>
-										{e.code}
-									</a>
+									<input
+										type="checkbox"
+										class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+										checked={selected.has(e.id)}
+										onchange={() => toggleOne(e.id)}
+										aria-label="Pilih {e.code}"
+									/>
+								</td>
+								<td class="px-4 py-3">
+									<div class="flex items-center gap-1.5">
+										<a
+											href="/edges/{e.id}"
+											class="font-mono text-sm font-medium text-indigo-600 hover:underline"
+										>
+											{e.code}
+										</a>
+										<button
+											type="button"
+											class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+											aria-label="Salin kode"
+											title="Salin kode"
+											onclick={() => copyCode(e)}
+										>
+											{#if copiedId === e.id}
+												<svg
+													class="h-3.5 w-3.5 text-green-600"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M5 13l4 4L19 7"
+													/>
+												</svg>
+											{:else}
+												<svg
+													class="h-3.5 w-3.5"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+													/>
+												</svg>
+											{/if}
+										</button>
+									</div>
 								</td>
 								<td class="px-4 py-3">
 									<div class="font-medium text-gray-900">{e.name}</div>
@@ -227,25 +494,32 @@
 										<div class="text-xs text-gray-500">{e.hostname}</div>
 									{/if}
 								</td>
-								<td class="px-4 py-3 font-mono text-xs text-gray-600">
-									{e.ip_address ?? '—'}
+								<td class="px-4 py-3">
+									<div class="flex items-center gap-2">
+										<span
+											class="inline-block h-2 w-2 shrink-0 rounded-full {freshnessColor(age)}"
+											title={freshnessLabel(age)}
+											aria-label={freshnessLabel(age)}
+										></span>
+										<div>
+											<div class="text-sm text-gray-700">{relativeTime(e.last_heartbeat)}</div>
+											{#if e.last_heartbeat}
+												<div class="text-xs text-gray-400">{formatDate(e.last_heartbeat)}</div>
+											{/if}
+										</div>
+									</div>
 								</td>
+								<td class="px-4 py-3 text-xs text-gray-500">{formatDate(e.created_at)}</td>
 								<td class="px-4 py-3">
 									<StatusBadge status={e.status} />
 								</td>
-								<td class="px-4 py-3">
-									<div class="text-sm text-gray-700">{relativeTime(e.last_heartbeat)}</div>
-									{#if e.last_heartbeat}
-										<div class="text-xs text-gray-400">{formatDate(e.last_heartbeat)}</div>
-									{/if}
-								</td>
-								<td class="px-4 py-3 text-xs text-gray-500">{formatDate(e.created_at)}</td>
 								<td class="px-4 py-3 text-right">
 									<div class="flex items-center justify-end gap-1">
 										<a
 											href="/edges/{e.id}"
 											class="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
 											aria-label="Detail"
+											title="Detail"
 										>
 											<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 												<path
@@ -266,6 +540,7 @@
 											type="button"
 											class="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
 											aria-label="Edit"
+											title="Edit"
 											onclick={() => openEdit(e)}
 										>
 											<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -281,6 +556,7 @@
 											type="button"
 											class="rounded-md p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600"
 											aria-label="Hapus"
+											title="Hapus"
 											onclick={() => openDelete(e)}
 										>
 											<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -342,4 +618,15 @@
 	loading={deleteLoading}
 	onconfirm={confirmDelete}
 	oncancel={() => (deletingEdge = null)}
+/>
+
+<ConfirmDialog
+	open={bulkConfirmOpen}
+	title={`Hapus ${selected.size} Edge?`}
+	message="Semua edge yang dipilih akan dihapus permanen. Tindakan ini tidak dapat dibatalkan."
+	confirmText="Hapus Semua"
+	variant="danger"
+	loading={bulkDeleting}
+	onconfirm={confirmBulkDelete}
+	oncancel={() => (bulkConfirmOpen = false)}
 />

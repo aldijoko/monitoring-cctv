@@ -17,6 +17,7 @@ interface SeedInput {
 	hours_ago: number;
 	duration_seconds: number;
 	size_mb: number;
+	tenant_id?: number;
 }
 
 function isoMinusHours(h: number): string {
@@ -37,13 +38,13 @@ function seed(): Recording[] {
 		{ id: 8, edge_id: 2, edge_code: 'KPL-204', camera_id: 5, camera_name: 'Parkiran Timur', hours_ago: 12, duration_seconds: 3600, size_mb: 200 },
 		{ id: 9, edge_id: 2, edge_code: 'KPL-204', camera_id: 6, camera_name: 'Pos Satpam', hours_ago: 4, duration_seconds: 3600, size_mb: 165 },
 		// KPL-318 — 1 camera
-		{ id: 10, edge_id: 3, edge_code: 'KPL-318', camera_id: 7, camera_name: 'Pintu Masuk SBY', hours_ago: 6, duration_seconds: 3600, size_mb: 185 },
-		{ id: 11, edge_id: 3, edge_code: 'KPL-318', camera_id: 7, camera_name: 'Pintu Masuk SBY', hours_ago: 18, duration_seconds: 3600, size_mb: 190 },
+		{ id: 10, edge_id: 3, edge_code: 'KPL-318', camera_id: 7, camera_name: 'Pintu Masuk SBY', hours_ago: 6, duration_seconds: 3600, size_mb: 185, tenant_id: 4 },
+		{ id: 11, edge_id: 3, edge_code: 'KPL-318', camera_id: 7, camera_name: 'Pintu Masuk SBY', hours_ago: 18, duration_seconds: 3600, size_mb: 190, tenant_id: 4 },
 		// KPL-512 — 3 cameras
-		{ id: 12, edge_id: 5, edge_code: 'KPL-512', camera_id: 8, camera_name: 'Ruang Server A', hours_ago: 1, duration_seconds: 3600, size_mb: 145 },
-		{ id: 13, edge_id: 5, edge_code: 'KPL-512', camera_id: 8, camera_name: 'Ruang Server A', hours_ago: 7, duration_seconds: 3600, size_mb: 150 },
-		{ id: 14, edge_id: 5, edge_code: 'KPL-512', camera_id: 9, camera_name: 'Ruang Server B', hours_ago: 1, duration_seconds: 3600, size_mb: 140 },
-		{ id: 15, edge_id: 5, edge_code: 'KPL-512', camera_id: 10, camera_name: 'Koridor', hours_ago: 9, duration_seconds: 3600, size_mb: 155 },
+		{ id: 12, edge_id: 5, edge_code: 'KPL-512', camera_id: 8, camera_name: 'Ruang Server A', hours_ago: 1, duration_seconds: 3600, size_mb: 145, tenant_id: 5 },
+		{ id: 13, edge_id: 5, edge_code: 'KPL-512', camera_id: 8, camera_name: 'Ruang Server A', hours_ago: 7, duration_seconds: 3600, size_mb: 150, tenant_id: 5 },
+		{ id: 14, edge_id: 5, edge_code: 'KPL-512', camera_id: 9, camera_name: 'Ruang Server B', hours_ago: 1, duration_seconds: 3600, size_mb: 140, tenant_id: 5 },
+		{ id: 15, edge_id: 5, edge_code: 'KPL-512', camera_id: 10, camera_name: 'Koridor', hours_ago: 9, duration_seconds: 3600, size_mb: 155, tenant_id: 5 },
 		{ id: 16, edge_id: 1, edge_code: 'KPL-119', camera_id: 1, camera_name: 'Lobby Utama', hours_ago: 24, duration_seconds: 3600, size_mb: 245 },
 		{ id: 17, edge_id: 1, edge_code: 'KPL-119', camera_id: 2, camera_name: 'Resepsionis', hours_ago: 24, duration_seconds: 3600, size_mb: 182 },
 		{ id: 18, edge_id: 2, edge_code: 'KPL-204', camera_id: 5, camera_name: 'Parkiran Timur', hours_ago: 36, duration_seconds: 3600, size_mb: 198 }
@@ -55,6 +56,7 @@ function seed(): Recording[] {
 		const startCompact = started.replace(/[-:T.Z]/g, '').slice(0, 14);
 		return {
 			id: i.id,
+			tenant_id: i.tenant_id ?? 1,
 			edge_id: i.edge_id,
 			edge_code: i.edge_code,
 			camera_id: i.camera_id,

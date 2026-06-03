@@ -1,10 +1,10 @@
 import { apiGet, apiPatch, apiDelete } from './client';
 import { USE_MOCKS } from '$lib/mocks/config';
 import { delay, mockCameras } from '$lib/mocks/live';
-import type { Camera } from '$lib/types/live';
+import type { LiveCamera } from '$lib/types/api';
 
 export interface CameraListResponse {
-	cameras: Camera[];
+	cameras: LiveCamera[];
 	total: number;
 }
 
@@ -35,17 +35,17 @@ export async function listCameras(params?: CameraFilters): Promise<CameraListRes
 	});
 }
 
-export async function getCamera(id: number): Promise<Camera> {
+export async function getCamera(id: number): Promise<LiveCamera> {
 	if (USE_MOCKS) {
 		await delay(150);
 		const cam = mockCameras.find((c) => c.id === id);
 		if (!cam) throw new Error('Kamera tidak ditemukan');
 		return cam;
 	}
-	return apiGet<Camera>(`/api/v1/cameras/${id}`);
+	return apiGet<LiveCamera>(`/api/v1/cameras/${id}`);
 }
 
-export async function updateCamera(id: number, patch: Partial<Camera>): Promise<Camera> {
+export async function updateCamera(id: number, patch: Partial<LiveCamera>): Promise<LiveCamera> {
 	if (USE_MOCKS) {
 		await delay(150);
 		const idx = mockCameras.findIndex((c) => c.id === id);
@@ -53,7 +53,7 @@ export async function updateCamera(id: number, patch: Partial<Camera>): Promise<
 		mockCameras[idx] = { ...mockCameras[idx], ...patch };
 		return mockCameras[idx];
 	}
-	return apiPatch<Camera>(`/api/v1/cameras/${id}`, patch);
+	return apiPatch<LiveCamera>(`/api/v1/cameras/${id}`, patch);
 }
 
 export async function deleteCamera(id: number): Promise<void> {
@@ -79,11 +79,11 @@ export interface CameraFormPayload {
 	enabled: boolean;
 }
 
-export async function createCamera(payload: CameraFormPayload): Promise<Camera> {
+export async function createCamera(payload: CameraFormPayload): Promise<LiveCamera> {
 	if (USE_MOCKS) {
 		await delay(200);
 		const next = mockCameras.reduce((m, c) => Math.max(m, c.id), 0) + 1;
-		const newCam: Camera = {
+		const newCam: LiveCamera = {
 			id: next,
 			edge_code: '',
 			edge_name: '',
