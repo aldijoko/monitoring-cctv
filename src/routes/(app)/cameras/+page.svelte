@@ -1,0 +1,188 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { listCameras, updateCamera, deleteCamera } from '$lib/api/cameras';
+	import { toasts } from '$lib/stores/toast';
+	const toast = toasts;
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import type { Camera, CameraStatus } from '$lib/types/live';
+
+	let cameras = $state<Camera[]>([]);
+	let loading = $state(true);
+	let search = $state('');
+	let filterStatus = $state<'' | CameraStatus>('');
+
+	async function load() {
+		loading = true;
+		try {
+			const res = await listCameras();
+			cameras = res.cameras ?? [];
+		} catch (err) {
+			toast.error((err as Error).message);
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function toggleActive(camera: Camera) {
+		try {
+			await updateCamera(camera.id, { enabled: !camera.enabled });
+			toast.success(
+				`Kamera ${camera.name} ${!camera.enabled ? 'diaktifkan' : 'dinonaktifkan'}`
+			);
+			await load();
+		} catch (err) {
+			toast.error((err as Error).message);
+		}
+	}
+
+	async function remove(camera: Camera) {
+		if (!confirm(`Hapus kamera ${camera.name}?`)) return;
+		try {
+			await deleteCamera(camera.id);
+			toast.success(`Kamera ${camera.name} dihapus`);
+			await load();
+		} catch (err) {
+			toast.error((err as Error).message);
+		}
+	}
+
+	let filtered = $derived(
+		cameras.filter((c) => {
+			const matchSearch = search
+				? c.name.toLowerCase().includes(search.toLowerCase()) ||
+					c.edge_name.toLowerCase().includes(search.toLowerCase())
+				: true;
+			const matchStatus = filterStatus ? c.status === filterStatus : true;
+			return matchSearch && matchStatus;
+		})
+	);
+
+	onMount(load);
+</script>
+
+<svelte:head><title>Kamera — Monitoring CCTV</title></svelte:head>
+
+<PageHeader title="Kamera" subtitle="Daftar semua kamera yang terhubung ke platform">
+	{#snippet actions()}
+		<a
+			href="/cameras/new"
+			class="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+		>
+			Tambah Kamera
+		</a>
+	{/snippet}
+</PageHeader>
+
+<div class="mb-4 flex flex-wrap items-center gap-2">
+	<input
+		type="search"
+		bind:value={search}
+		placeholder="Cari nama / edge…"
+		class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+	/>
+	<select
+		bind:value={filterStatus}
+		class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+	>
+		<option value="">Semua status</option>
+		<option value="recording">Recording</option>
+		<option value="online">Online</option>
+		<option value="offline">Offline</option>
+		<option value="error">Error</option>
+	</select>
+	<button
+		onclick={load}
+		class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+	>
+		Refresh
+	</button>
+</div>
+
+{#if loading}
+	<div class="py-12 text-center text-sm text-gray-500">Memuat kamera…</div>
+{:else if filtered.length === 0}
+	<EmptyState
+		title={search || filterStatus ? 'Tidak ada hasil' : 'Belum ada kamera'}
+		message={search || filterStatus
+			? 'Coba kata kunci atau filter lain.'
+			: 'Tambahkan kamera RTSP/ONVIF untuk mulai merekam.'}
+	>
+		{#snippet action()}
+			{#if !search && !filterStatus}
+				<a
+					href="/cameras/new"
+					class="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+				>
+					Tambah Kamera
+				</a>
+			{/if}
+		{/snippet}
+	</EmptyState>
+{:else}
+	<div class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+		<table class="w-full text-sm">
+			<thead class="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+				<tr>
+					<th class="px-4 py-3">Nama</th>
+					<th class="px-4 py-3">Edge</th>
+					<th class="px-4 py-3">Channel</th>
+					<th class="px-4 py-3">Resolusi / FPS</th>
+					<th class="px-4 py-3">Status</th>
+					<th class="px-4 py-3 text-right">Aksi</th>
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-gray-100">
+				{#each filtered as camera (camera.id)}
+					<tr class="hover:bg-gray-50">
+						<td class="px-4 py-3">
+							<a href="/cameras/{camera.id}" class="font-medium text-gray-900 hover:text-indigo-600">
+								{camera.name}
+							</a>
+							<div class="text-xs text-gray-400">{camera.codec}</div>
+						</td>
+						<td class="px-4 py-3 text-gray-600">{camera.edge_name}</td>
+						<td class="px-4 py-3 text-gray-600">CH {camera.channel}</td>
+						<td class="px-4 py-3 text-gray-600">
+							{camera.resolution} @ {camera.fps}fps
+						</td>
+						<td class="px-4 py-3">
+							{#if !camera.enabled}
+								<StatusBadge status="inactive" label="Nonaktif" />
+							{:else if camera.status === 'recording'}
+								<StatusBadge status="recording" label="Recording" />
+							{:else if camera.status === 'online'}
+								<StatusBadge status="online" label="Online" />
+							{:else if camera.status === 'offline'}
+								<StatusBadge status="offline" label="Offline" />
+							{:else}
+								<StatusBadge status="error" label="Error" />
+							{/if}
+						</td>
+						<td class="px-4 py-3 text-right">
+							<button
+								onclick={() => toggleActive(camera)}
+								class="mr-2 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+							>
+								{camera.enabled ? 'Nonaktifkan' : 'Aktifkan'}
+							</button>
+							<a
+								href="/cameras/{camera.id}/edit"
+								class="mr-2 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+							>
+								Edit
+							</a>
+							<button
+								onclick={() => remove(camera)}
+								class="rounded-md border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+							>
+								Hapus
+							</button>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
+{/if}
