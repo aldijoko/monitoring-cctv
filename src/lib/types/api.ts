@@ -1,11 +1,10 @@
-export type UserRole = 'admin' | 'operator' | 'viewer';
+export type UserRole = 'superadmin' | 'admin' | 'viewer';
 
 export interface User {
 	id: number;
 	username: string;
 	email?: string;
 	role: UserRole;
-	tenant_id: number;
 	is_active: boolean;
 	created_at: string;
 }
@@ -28,8 +27,6 @@ export interface Edge {
 	hostname?: string;
 	ip_address?: string;
 	location?: string;
-	tenant_id: number;
-	tenant_name?: string;
 	camera_count?: number;
 	last_camera_uptime?: string;
 	status: 'online' | 'offline' | 'pending';
@@ -37,14 +34,8 @@ export interface Edge {
 	created_at: string;
 }
 
-export interface Tenant {
-	id: number;
-	name: string;
-}
-
 export interface Camera {
 	id: number;
-	tenant_id: number;
 	edge_id: number;
 	name: string;
 	rtsp_url?: string;
@@ -58,12 +49,14 @@ export type StreamProtocol = 'hls' | 'webrtc' | 'mjpeg';
 
 export interface LiveCamera {
 	id: number;
-	tenant_id?: number;
 	edge_id: number;
 	edge_code: string;
 	edge_name: string;
 	name: string;
 	channel: number;
+	/** RTSP source dikonfigurasi admin, tidak pernah dikirim ke browser. */
+	source_url?: string;
+	/** URL HLS hasil transcode (mediamtx), inilah yang diputar frontend. */
 	stream_url: string;
 	stream_protocol: StreamProtocol;
 	resolution: string;
@@ -106,7 +99,6 @@ export const GRID_PRESETS: GridConfig[] = [
 
 export interface Recording {
 	id: number;
-	tenant_id: number;
 	edge_id: number;
 	edge_code: string;
 	camera_id: number;

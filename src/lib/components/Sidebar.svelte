@@ -9,7 +9,7 @@
 		href: string;
 		label: string;
 		icon: Icon;
-		roles?: Array<'admin' | 'operator' | 'viewer'>;
+		roles?: Array<'superadmin' | 'admin' | 'viewer'>;
 	}
 
 	const items: NavItem[] = [
@@ -22,7 +22,7 @@
 			href: '/users',
 			label: 'Users',
 			icon: 'users',
-			roles: ['admin']
+			roles: ['superadmin']
 		},
 		{ href: '/profile', label: 'Profile', icon: 'settings' }
 	];
@@ -52,7 +52,7 @@
 
 	function canAccess(item: NavItem, role: string | undefined): boolean {
 		if (!item.roles) return true;
-		return role ? item.roles.includes(role as 'admin' | 'operator' | 'viewer') : false;
+		return role ? item.roles.includes(role as 'superadmin' | 'admin' | 'viewer') : false;
 	}
 </script>
 

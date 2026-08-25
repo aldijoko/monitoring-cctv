@@ -1,28 +1,44 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { listCameras, updateCamera, deleteCamera } from '$lib/api/cameras';
-	import { toasts } from '$lib/stores/toast';
-	const toast = toasts;
+	import { goto, invalidateAll } from '$app/navigation';
+	import { navigating } from '$app/state';
+	import { updateCamera, deleteCamera } from '$lib/api/cameras';
+	import { toasts as toast } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { LiveCamera, CameraStatus } from '$lib/types/api';
+	import type { PageProps } from './$types';
 
-	let cameras = $state<LiveCamera[]>([]);
-	let loading = $state(true);
-	let search = $state('');
-	let filterStatus = $state<'' | CameraStatus>('');
+	let { data }: PageProps = $props();
 
-	async function load() {
-		loading = true;
-		try {
-			const res = await listCameras();
-			cameras = res.cameras ?? [];
-		} catch (err) {
-			toast.error((err as Error).message);
-		} finally {
-			loading = false;
-		}
+	let search = $state(data.filters.search);
+	let filterStatus = $state<'' | CameraStatus>(data.filters.status);
+	let loading = $derived(!!navigating.to);
+
+	$effect(() => {
+		search = data.filters.search;
+		filterStatus = data.filters.status;
+	});
+
+	function applyFilters(overrides: { search?: string; status?: '' | CameraStatus }) {
+		const s = overrides.search ?? search;
+		const st = overrides.status ?? filterStatus;
+		const params = new URLSearchParams();
+		if (s) params.set('search', s);
+		if (st) params.set('status', st);
+		goto(params.toString() ? `/cameras?${params}` : '/cameras', { keepFocus: true });
+	}
+
+	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+	function onSearchInput(e: Event) {
+		search = (e.currentTarget as HTMLInputElement).value;
+		if (searchDebounce) clearTimeout(searchDebounce);
+		searchDebounce = setTimeout(() => applyFilters({ search }), 300);
+	}
+
+	function onStatusChange(e: Event) {
+		filterStatus = (e.currentTarget as HTMLSelectElement).value as '' | CameraStatus;
+		applyFilters({ status: filterStatus });
 	}
 
 	async function toggleActive(camera: LiveCamera) {
@@ -31,7 +47,7 @@
 			toast.success(
 				`Kamera ${camera.name} ${!camera.enabled ? 'diaktifkan' : 'dinonaktifkan'}`
 			);
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error((err as Error).message);
 		}
@@ -42,24 +58,11 @@
 		try {
 			await deleteCamera(camera.id);
 			toast.success(`Kamera ${camera.name} dihapus`);
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error((err as Error).message);
 		}
 	}
-
-	let filtered = $derived(
-		cameras.filter((c) => {
-			const matchSearch = search
-				? c.name.toLowerCase().includes(search.toLowerCase()) ||
-					c.edge_name.toLowerCase().includes(search.toLowerCase())
-				: true;
-			const matchStatus = filterStatus ? c.status === filterStatus : true;
-			return matchSearch && matchStatus;
-		})
-	);
-
-	onMount(load);
 </script>
 
 <svelte:head><title>Kamera — Monitoring CCTV</title></svelte:head>
@@ -78,12 +81,14 @@
 <div class="mb-4 flex flex-wrap items-center gap-2">
 	<input
 		type="search"
-		bind:value={search}
+		value={search}
+		oninput={onSearchInput}
 		placeholder="Cari nama / edge…"
 		class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 	/>
 	<select
-		bind:value={filterStatus}
+		value={filterStatus}
+		onchange={onStatusChange}
 		class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 	>
 		<option value="">Semua status</option>
@@ -93,7 +98,7 @@
 		<option value="error">Error</option>
 	</select>
 	<button
-		onclick={load}
+		onclick={() => invalidateAll()}
 		class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
 	>
 		Refresh
@@ -102,7 +107,7 @@
 
 {#if loading}
 	<div class="py-12 text-center text-sm text-gray-500">Memuat kamera…</div>
-{:else if filtered.length === 0}
+{:else if data.cameras.length === 0}
 	<EmptyState
 		title={search || filterStatus ? 'Tidak ada hasil' : 'Belum ada kamera'}
 		message={search || filterStatus
@@ -134,7 +139,7 @@
 				</tr>
 			</thead>
 			<tbody class="divide-y divide-gray-100">
-				{#each filtered as camera (camera.id)}
+				{#each data.cameras as camera (camera.id)}
 					<tr class="hover:bg-gray-50">
 						<td class="px-4 py-3">
 							<a href="/cameras/{camera.id}" class="font-medium text-gray-900 hover:text-indigo-600">

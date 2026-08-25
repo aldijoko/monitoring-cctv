@@ -18,7 +18,7 @@
 
 	let username = $state(initial?.username ?? '');
 	let email = $state(initial?.email ?? '');
-	let role = $state<UserRole>(initial?.role ?? 'operator');
+	let role = $state<UserRole>(initial?.role ?? 'viewer');
 	let isActive = $state(initial?.is_active ?? true);
 	let password = $state('');
 	let confirmPassword = $state('');
@@ -132,8 +132,8 @@
 					bind:value={role}
 					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 				>
+					<option value="superadmin">Superadmin</option>
 					<option value="admin">Admin</option>
-					<option value="operator">Operator</option>
 					<option value="viewer">Viewer</option>
 				</select>
 			</label>

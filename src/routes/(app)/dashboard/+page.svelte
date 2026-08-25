@@ -1,36 +1,21 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
+	import { navigating } from '$app/state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import LineChart from '$lib/components/LineChart.svelte';
 	import BarChart from '$lib/components/BarChart.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { fetchDashboard } from '$lib/api/dashboard';
-	import type {
-		DashboardData,
-		EdgeMetrics,
-		EdgeHealth,
-		CameraAlert
-	} from '$lib/types/dashboard';
+	import type { EdgeMetrics, EdgeHealth, CameraAlert, DashboardData } from '$lib/types/dashboard';
+	import type { PageProps } from './$types';
 
-	let data = $state<DashboardData | null>(null);
-	let loading = $state(true);
-	let selectedEdgeId = $state<string | null>(null);
+	let { data }: PageProps = $props();
 
-	async function load() {
-		loading = true;
-		try {
-			data = await fetchDashboard();
-			if (data && data.edges.length > 0) {
-				selectedEdgeId = data.edges[0].edge_id;
-			}
-		} finally {
-			loading = false;
-		}
-	}
+	let loading = $derived(!!navigating.to);
+	let selectedEdgeId = $state<string | null>(data.dashboard.edges[0]?.edge_id ?? null);
 
 	const selectedEdge = $derived<EdgeMetrics | null>(
-		data?.edges.find((e) => e.edge_id === selectedEdgeId) ?? null
+		data.dashboard.edges.find((e) => e.edge_id === selectedEdgeId) ?? null
 	);
 
 	function formatNumber(n: number): string {
@@ -39,12 +24,6 @@
 
 	function edgeStatus(s: EdgeHealth['status']) {
 		return s;
-	}
-
-	function alertColor(sev: CameraAlert['severity']): string {
-		if (sev === 'critical') return 'text-red-700 bg-red-50';
-		if (sev === 'warning') return 'text-amber-700 bg-amber-50';
-		return 'text-blue-700 bg-blue-50';
 	}
 
 	function timeAgo(iso: string): string {
@@ -73,7 +52,7 @@
 		};
 	}
 
-	const edgeHealthList = $derived<EdgeHealth[]>(data?.edges.map(edgeHealth) ?? []);
+	const edgeHealthList = $derived<EdgeHealth[]>(data.dashboard.edges.map(edgeHealth));
 
 	function recentAlerts(d: DashboardData): CameraAlert[] {
 		const alerts: CameraAlert[] = [];
@@ -104,9 +83,7 @@
 			.slice(0, 6);
 	}
 
-	const alerts = $derived<CameraAlert[]>(data ? recentAlerts(data) : []);
-
-	onMount(load);
+	const alerts = $derived<CameraAlert[]>(recentAlerts(data.dashboard));
 </script>
 
 <svelte:head><title>Dashboard — Monitoring CCTV</title></svelte:head>
@@ -117,7 +94,7 @@
 />
 
 <div class="p-6 space-y-6">
-	{#if loading || !data}
+	{#if loading}
 		<div class="py-12 text-center text-sm text-gray-500">Memuat data dashboard…</div>
 	{:else}
 		<!-- KPI cards -->
@@ -125,15 +102,15 @@
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Total Edges</p>
 				<p class="mt-2 text-3xl font-semibold text-gray-900">
-					{formatNumber(data.summary.edges_total)}
+					{formatNumber(data.dashboard.summary.edges_total)}
 				</p>
 				<p class="mt-1 text-xs text-gray-400">
-					{formatNumber(data.summary.edges_online)} online ·
-					{formatNumber(data.summary.edges_offline)} offline
+					{formatNumber(data.dashboard.summary.edges_online)} online ·
+					{formatNumber(data.dashboard.summary.edges_offline)} offline
 				</p>
 				<div class="mt-3 h-8">
 					<Sparkline
-						values={data.edges.map((e) => e.uptime_pct)}
+						values={data.dashboard.edges.map((e) => e.uptime_pct)}
 						color="#10b981"
 						height={32}
 					/>
@@ -143,12 +120,16 @@
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Kamera Aktif</p>
 				<p class="mt-2 text-3xl font-semibold text-gray-900">
-					{formatNumber(data.summary.cameras_online)}
+					{formatNumber(data.dashboard.summary.cameras_online)}
 				</p>
-				<p class="mt-1 text-xs text-gray-400">dari {formatNumber(data.summary.cameras_total)}</p>
+				<p class="mt-1 text-xs text-gray-400">
+					dari {formatNumber(data.dashboard.summary.cameras_total)}
+				</p>
 				<div class="mt-3 h-8">
 					<Sparkline
-						values={data.edges.map((e) => (e.cameras_online / e.cameras_total) * 100)}
+						values={data.dashboard.edges.map((e) =>
+							e.cameras_total > 0 ? (e.cameras_online / e.cameras_total) * 100 : 0
+						)}
 						color="#3b82f6"
 						height={32}
 					/>
@@ -158,15 +139,17 @@
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Storage</p>
 				<p class="mt-2 text-3xl font-semibold text-gray-900">
-					{formatNumber(data.summary.storage_used_gb)} GB
+					{formatNumber(data.dashboard.summary.storage_used_gb)} GB
 				</p>
 				<p class="mt-1 text-xs text-gray-400">
-					{data.summary.storage_pct.toFixed(1)}% dari {formatNumber(data.summary.storage_total_gb)} GB
+					{data.dashboard.summary.storage_pct.toFixed(1)}% dari {formatNumber(
+						data.dashboard.summary.storage_total_gb
+					)} GB
 				</p>
 				<div class="mt-3 h-2 w-full rounded-full bg-gray-100">
 					<div
 						class="h-2 rounded-full bg-amber-500"
-						style="width: {data.summary.storage_pct}%"
+						style="width: {data.dashboard.summary.storage_pct}%"
 					></div>
 				</div>
 			</div>
@@ -174,14 +157,14 @@
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Bandwidth</p>
 				<p class="mt-2 text-3xl font-semibold text-gray-900">
-					{data.summary.bandwidth_in_mbps.toFixed(1)} Mbps
+					{data.dashboard.summary.bandwidth_in_mbps.toFixed(1)} Mbps
 				</p>
 				<p class="mt-1 text-xs text-gray-400">
-					Out: {data.summary.bandwidth_out_mbps.toFixed(1)} Mbps
+					Out: {data.dashboard.summary.bandwidth_out_mbps.toFixed(1)} Mbps
 				</p>
 				<div class="mt-3 h-8">
 					<Sparkline
-						values={data.edges[0]?.network_in.data.map((p) => p.value) ?? []}
+						values={data.dashboard.edges[0]?.network_in.data.map((p) => p.value) ?? []}
 						color="#8b5cf6"
 						height={32}
 					/>
@@ -202,7 +185,7 @@
 						value={selectedEdgeId}
 						onchange={(e) => (selectedEdgeId = (e.currentTarget as HTMLSelectElement).value)}
 					>
-						{#each data.edges as edge (edge.edge_id)}
+						{#each data.dashboard.edges as edge (edge.edge_id)}
 							<option value={edge.edge_id}>{edge.edge_id} — {edge.edge_name}</option>
 						{/each}
 					</select>
@@ -220,7 +203,7 @@
 				<h2 class="text-base font-semibold text-gray-900">Distribusi Uptime</h2>
 				<p class="text-sm text-gray-500">Jumlah kamera per rentang uptime</p>
 				<div class="mt-4">
-					<BarChart data={data.camera_health} height={260} />
+					<BarChart data={data.dashboard.camera_health} height={260} />
 				</div>
 			</div>
 		</div>
@@ -329,25 +312,25 @@
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Rekam Hari Ini</p>
 				<p class="mt-2 text-2xl font-semibold text-gray-900">
-					{formatNumber(data.summary.recording_hours_today)} jam
+					{formatNumber(data.dashboard.summary.recording_hours_today)} jam
 				</p>
 			</div>
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Motion Events</p>
 				<p class="mt-2 text-2xl font-semibold text-gray-900">
-					{formatNumber(data.summary.motion_events_today)}
+					{formatNumber(data.dashboard.summary.motion_events_today)}
 				</p>
 			</div>
 			<div class="card p-5">
 				<p class="text-sm font-medium text-gray-500">Diperbarui</p>
 				<p class="mt-2 text-sm font-medium text-gray-900">
-					{new Date(data.generated_at).toLocaleString('id-ID', {
+					{new Date(data.dashboard.generated_at).toLocaleString('id-ID', {
 						dateStyle: 'medium',
 						timeStyle: 'short'
 					})}
 				</p>
 				<button
-					onclick={load}
+					onclick={() => invalidateAll()}
 					class="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-700"
 				>
 					Refresh sekarang

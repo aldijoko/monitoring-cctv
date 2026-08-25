@@ -3,7 +3,8 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import CameraForm from '$lib/components/CameraForm.svelte';
 
-	const lockedEdgeId = $derived(page.url.searchParams.get('edge_id') ?? undefined);
+	const lockedEdgeIdParam = $derived(page.url.searchParams.get('edge_id'));
+	const lockedEdgeId = $derived(lockedEdgeIdParam ? Number(lockedEdgeIdParam) : undefined);
 </script>
 
 <svelte:head><title>Tambah Kamera — Monitoring CCTV</title></svelte:head>

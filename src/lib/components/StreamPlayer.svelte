@@ -1,17 +1,19 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import type Hls from 'hls.js';
-	import type { StreamInfo, StreamStatus } from '$lib/types/livestream';
+	import type { LiveCamera } from '$lib/types/api';
+
+	export type PlaybackStatus = 'online' | 'offline' | 'connecting' | 'error';
 
 	type Props = {
 		src?: string; // HLS .m3u8 URL
-		stream?: StreamInfo;
+		stream?: LiveCamera;
 		poster?: string;
 		autoplay?: boolean;
 		muted?: boolean;
 		controls?: boolean;
 		onerror?: (msg: string) => void;
-		onstatuschange?: (s: StreamStatus) => void;
+		onstatuschange?: (s: PlaybackStatus) => void;
 	};
 
 	let {
@@ -32,7 +34,7 @@
 	let state = $state<'idle' | 'loading' | 'playing' | 'error'>('idle');
 	let errorMsg = $state<string | null>(null);
 
-	function setStatus(s: StreamStatus) {
+	function setStatus(s: PlaybackStatus) {
 		state = s === 'online' ? 'playing' : s === 'error' ? 'error' : 'loading';
 		onstatuschange?.(s);
 	}
@@ -53,7 +55,13 @@
 				// HLS.js (Chrome/Firefox)
 				const { default: HlsLib } = await import('hls.js');
 				if (HlsLib.isSupported()) {
-					hls = new HlsLib({ enableWorker: true, lowLatencyMode: true });
+					// Low-latency HLS needs tight blocking-reload timing from the
+					// player, which struggles against sources relayed over the
+					// public internet (jittery upstream) rather than a local
+					// camera — regular HLS tolerates that jitter far better, and
+					// a few seconds of extra latency is fine for a monitoring
+					// dashboard. Must match mediamtx.yml's hlsVariant (mpegts).
+					hls = new HlsLib({ enableWorker: true, lowLatencyMode: false });
 					hls.loadSource(src);
 					hls.attachMedia(video);
 					hls.on(HlsLib.Events.MANIFEST_PARSED, () => {

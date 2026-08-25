@@ -1,13 +1,5 @@
+import { apiGet, apiPost, apiPut, apiDelete } from './client';
 import type { Edge, Paginated } from '$lib/types/api';
-import { edgesMock, type ListParams } from '$lib/mocks/edges';
-
-/**
- * Edges API client.
- *
- * Saat ini masih menggunakan mock data di-memory + localStorage.
- * Untuk produksi, ganti body fungsi di bawah dengan `request<...>('/admin/edges', ...)`.
- * Signature & return type dijaga identik agar swap hanya di satu tempat.
- */
 
 export interface EdgeFormData {
 	name: string;
@@ -15,29 +7,41 @@ export interface EdgeFormData {
 	ip_address?: string;
 }
 
+export interface ListParams {
+	search?: string;
+	status?: Edge['status'] | 'all';
+	limit?: number;
+	offset?: number;
+	sort?: 'code' | 'name' | 'status' | 'created_at' | 'last_heartbeat';
+	order?: 'asc' | 'desc';
+}
+
 export const edgesApi = {
 	list(params: ListParams = {}): Promise<Paginated<Edge>> {
-		return edgesMock.list(params);
+		return apiGet<Paginated<Edge>>('/edges', {
+			search: params.search,
+			status: params.status === 'all' ? undefined : params.status,
+			limit: params.limit,
+			offset: params.offset,
+			sort: params.sort,
+			order: params.order
+		});
 	},
 
 	get(id: number): Promise<Edge | null> {
-		return edgesMock.get(id);
+		return apiGet<Edge>(`/edges/${id}`);
 	},
 
 	create(data: EdgeFormData): Promise<Edge> {
-		return edgesMock.create(data);
+		return apiPost<Edge, EdgeFormData>('/edges', data);
 	},
 
 	update(id: number, data: EdgeFormData): Promise<Edge> {
-		return edgesMock.update(id, data);
+		return apiPut<Edge, EdgeFormData>(`/edges/${id}`, data);
 	},
 
 	remove(id: number): Promise<void> {
-		return edgesMock.remove(id);
-	},
-
-	reset(): Promise<void> {
-		return edgesMock.reset();
+		return apiDelete(`/edges/${id}`);
 	}
 };
 

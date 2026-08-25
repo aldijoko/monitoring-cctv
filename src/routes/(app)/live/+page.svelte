@@ -1,19 +1,22 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import StreamPlayer from '$lib/components/StreamPlayer.svelte';
+	import StreamPlayer, { type PlaybackStatus } from '$lib/components/StreamPlayer.svelte';
 	import CameraPicker from '$lib/components/CameraPicker.svelte';
-	import { getStreams } from '$lib/api/livestream';
-	import type { StreamInfo, StreamStatus } from '$lib/types/livestream';
+	import { listCameras } from '$lib/api/cameras';
+	import type { LiveCamera } from '$lib/types/api';
+	import type { PageProps } from './$types';
 
 	type Layout = '1x1' | '2x2' | '3x3' | '4x4';
 
-	let streams = $state<StreamInfo[]>([]);
-	let selected = $state<string[]>([]);
+	let { data }: PageProps = $props();
+
+	let streams = $state<LiveCamera[]>(data.cameras);
+	let selected = $state<number[]>([]);
 	let layout = $state<Layout>('2x2');
-	let loading = $state(true);
+	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let showPicker = $state(false);
-	let fullscreenStreamId = $state<string | null>(null);
+	let fullscreenStreamId = $state<number | null>(null);
+	let playbackStatus = $state<Record<number, PlaybackStatus>>({});
 
 	const maxSlots: Record<Layout, number> = {
 		'1x1': 1,
@@ -40,8 +43,8 @@
 		loading = true;
 		error = null;
 		try {
-			const all = await getStreams();
-			streams = all;
+			const res = await listCameras();
+			streams = res.cameras.filter((c) => c.enabled);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Gagal memuat stream';
 		} finally {
@@ -49,7 +52,7 @@
 		}
 	}
 
-	function handlePickCamera(streamId: string) {
+	function handlePickCamera(streamId: number) {
 		const slot = maxSlots[layout];
 		if (selected.includes(streamId)) {
 			selected = selected.filter((x) => x !== streamId);
@@ -70,11 +73,8 @@
 		selected = [];
 	}
 
-	function onStatusChange(streamId: string, status: StreamStatus) {
-		const idx = streams.findIndex((s) => s.id === streamId);
-		if (idx >= 0) {
-			streams[idx] = { ...streams[idx], status };
-		}
+	function onStatusChange(streamId: number, status: PlaybackStatus) {
+		playbackStatus = { ...playbackStatus, [streamId]: status };
 	}
 
 	function onLayoutChange(newLayout: Layout) {
@@ -85,17 +85,11 @@
 		}
 	}
 
-	function toggleFullscreen(streamId: string) {
+	function toggleFullscreen(streamId: number) {
 		fullscreenStreamId = fullscreenStreamId === streamId ? null : streamId;
 	}
 
-	onMount(() => {
-		loadStreams();
-	});
-
-	const selectedStreams = $derived(
-		streams.filter((s) => selected.includes(s.id))
-	);
+	const selectedStreams = $derived(streams.filter((s) => selected.includes(s.id)));
 </script>
 
 <svelte:head>
@@ -255,10 +249,24 @@
 
 <!-- Camera Picker Drawer -->
 {#if showPicker}
-	<CameraPicker
-		{streams}
-		{selected}
-		onpick={handlePickCamera}
-		onclose={() => (showPicker = false)}
-	/>
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+		role="dialog"
+		aria-modal="true"
+	>
+		<button
+			type="button"
+			class="absolute inset-0 cursor-default"
+			aria-label="Tutup"
+			onclick={() => (showPicker = false)}
+		></button>
+		<div class="relative w-full max-w-lg">
+			<CameraPicker
+				{streams}
+				{selected}
+				onpick={handlePickCamera}
+				onclose={() => (showPicker = false)}
+			/>
+		</div>
+	</div>
 {/if}

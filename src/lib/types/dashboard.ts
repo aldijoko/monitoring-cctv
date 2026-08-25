@@ -16,7 +16,6 @@ export type MetricSeries = {
 export type EdgeMetrics = {
 	edge_id: string;
 	edge_name: string;
-	tenant_id: string;
 	cpu: MetricSeries;
 	memory: MetricSeries;
 	disk: MetricSeries;

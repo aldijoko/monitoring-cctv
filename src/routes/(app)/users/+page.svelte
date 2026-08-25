@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { goto, invalidateAll } from '$app/navigation';
+	import { navigating } from '$app/state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import SearchBar from '$lib/components/SearchBar.svelte';
@@ -12,18 +14,30 @@
 	import { usersApi, type UserFormData, type UserUpdateData } from '$lib/api/users';
 	import { toast } from '$lib/stores/toast';
 	import type { User, UserRole } from '$lib/types/api';
+	import type { PageProps } from './$types';
 
 	type RoleFilter = UserRole | 'all';
+	type ActiveFilter = 'all' | 'active' | 'inactive';
 
-	let items = $state<User[]>([]);
-	let total = $state(0);
-	let loading = $state(false);
+	let { data }: PageProps = $props();
 
-	let search = $state('');
-	let roleFilter = $state<RoleFilter>('all');
-	let activeFilter = $state<'all' | 'active' | 'inactive'>('all');
-	const pageSize = 10;
-	let page = $state(1);
+	let items = $derived(data.users.items);
+	let total = $derived(data.users.total);
+	let pageSize = $derived(data.filters.pageSize);
+	let currentPage = $derived(data.filters.page);
+	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
+	let loading = $derived(!!navigating.to);
+
+	let search = $state(data.filters.search);
+	let roleFilter = $state<RoleFilter>(data.filters.role as RoleFilter);
+	let activeFilter = $state<ActiveFilter>(data.filters.active as ActiveFilter);
+
+	// Keep local filter state in sync when navigating (back/forward, external links).
+	$effect(() => {
+		search = data.filters.search;
+		roleFilter = data.filters.role as RoleFilter;
+		activeFilter = data.filters.active as ActiveFilter;
+	});
 
 	let formOpen = $state(false);
 	let editingUser = $state<User | null>(null);
@@ -34,46 +48,39 @@
 	let resettingUser = $state<User | null>(null);
 	let tempPassword = $state<string | null>(null);
 
-	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
-	const offset = $derived((page - 1) * pageSize);
+	function applyFilters(overrides: {
+		search?: string;
+		role?: RoleFilter;
+		active?: ActiveFilter;
+		page?: number;
+	}) {
+		const s = overrides.search ?? search;
+		const r = overrides.role ?? roleFilter;
+		const a = overrides.active ?? activeFilter;
+		const p = overrides.page ?? 1;
 
-	async function load() {
-		loading = true;
-		try {
-			const res = await usersApi.list({
-				search,
-				role: roleFilter === 'all' ? undefined : roleFilter,
-				is_active: activeFilter === 'all' ? undefined : activeFilter === 'active',
-				limit: pageSize,
-				offset
-			});
-			items = res.items;
-			total = res.total;
-		} catch (err) {
-			toast.error('Gagal memuat data user');
-			console.error(err);
-		} finally {
-			loading = false;
-		}
-	}
+		const params = new URLSearchParams();
+		if (s) params.set('search', s);
+		if (r !== 'all') params.set('role', r);
+		if (a !== 'all') params.set('active', a);
+		if (p > 1) params.set('page', String(p));
 
-	function resetPage() {
-		page = 1;
+		goto(params.toString() ? `/users?${params}` : '/users', { keepFocus: true });
 	}
 
 	function onSearch(v: string) {
 		search = v;
-		resetPage();
+		applyFilters({ search: v, page: 1 });
 	}
 
 	function onRoleChange(e: Event) {
 		roleFilter = (e.currentTarget as HTMLSelectElement).value as RoleFilter;
-		resetPage();
+		applyFilters({ role: roleFilter, page: 1 });
 	}
 
 	function onActiveChange(e: Event) {
-		activeFilter = (e.currentTarget as HTMLSelectElement).value as 'all' | 'active' | 'inactive';
-		resetPage();
+		activeFilter = (e.currentTarget as HTMLSelectElement).value as ActiveFilter;
+		applyFilters({ active: activeFilter, page: 1 });
 	}
 
 	function openCreate() {
@@ -86,18 +93,18 @@
 		formOpen = true;
 	}
 
-	async function handleFormSubmit(data: UserFormData | UserUpdateData) {
+	async function handleFormSubmit(formData: UserFormData | UserUpdateData) {
 		try {
 			if (editingUser) {
-				await usersApi.update(editingUser.id, data as UserUpdateData);
+				await usersApi.update(editingUser.id, formData as UserUpdateData);
 				toast.success(`User ${editingUser.username} diperbarui`);
 			} else {
-				const created = await usersApi.create(data as UserFormData);
+				const created = await usersApi.create(formData as UserFormData);
 				toast.success(`User ${created.username} berhasil ditambahkan`);
 			}
 			formOpen = false;
 			editingUser = null;
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error('Gagal menyimpan user');
 			console.error(err);
@@ -115,7 +122,7 @@
 			await usersApi.remove(deletingUser.id);
 			toast.success(`User ${deletingUser.username} dihapus`);
 			deletingUser = null;
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error('Gagal menghapus user');
 			console.error(err);
@@ -128,7 +135,7 @@
 		try {
 			await usersApi.setActive(u.id, !u.is_active);
 			toast.success(`User ${u.username} ${!u.is_active ? 'diaktifkan' : 'dinonaktifkan'}`);
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error('Gagal mengubah status user');
 			console.error(err);
@@ -165,7 +172,7 @@
 	}
 
 	function roleLabel(role: UserRole): string {
-		return { admin: 'Admin', operator: 'Operator', viewer: 'Viewer' }[role];
+		return { superadmin: 'Superadmin', admin: 'Admin', viewer: 'Viewer' }[role];
 	}
 </script>
 
@@ -173,7 +180,7 @@
 	<title>Users — CCTV Monitoring</title>
 </svelte:head>
 
-<PageHeader title="Users" description="Kelola akun admin, operator, dan viewer">
+<PageHeader title="Users" description="Kelola akun superadmin, admin, dan viewer">
 	{#snippet actions()}
 		<Button onclick={openCreate}>
 			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -197,8 +204,8 @@
 				onchange={onRoleChange}
 			>
 				<option value="all">Semua role</option>
+				<option value="superadmin">Superadmin</option>
 				<option value="admin">Admin</option>
-				<option value="operator">Operator</option>
 				<option value="viewer">Viewer</option>
 			</select>
 
@@ -265,7 +272,7 @@
 								</td>
 								<td class="px-4 py-3">
 									<StatusBadge
-										variant={u.is_active ? 'success' : 'muted'}
+										status={u.is_active ? 'active' : 'inactive'}
 										label={u.is_active ? 'Aktif' : 'Nonaktif'}
 									/>
 								</td>
@@ -377,13 +384,11 @@
 			</div>
 
 			<Pagination
-				page={page}
+				page={currentPage}
 				{totalPages}
 				{total}
 				{pageSize}
-				onchange={(p) => {
-					page = p;
-				}}
+				onchange={(p) => applyFilters({ page: p })}
 			/>
 		{/if}
 	</div>

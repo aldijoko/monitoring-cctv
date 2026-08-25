@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { goto, invalidateAll } from '$app/navigation';
+	import { navigating } from '$app/state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import SearchBar from '$lib/components/SearchBar.svelte';
@@ -11,21 +13,32 @@
 	import { edgesApi, type EdgeFormData } from '$lib/api/edges';
 	import { toast } from '$lib/stores/toast';
 	import type { Edge } from '$lib/types/api';
+	import type { PageProps } from './$types';
 
 	type StatusFilter = Edge['status'] | 'all';
-
-	let items = $state<Edge[]>([]);
-	let total = $state(0);
-	let loading = $state(false);
-
-	let search = $state('');
-	let statusFilter = $state<StatusFilter>('all');
-	const pageSize = 10;
-	let page = $state(1);
-
 	type SortKey = 'code' | 'name' | 'status' | 'last_heartbeat' | 'created_at';
-	let sortKey = $state<SortKey>('created_at');
-	let sortOrder = $state<'asc' | 'desc'>('desc');
+	type SortableKey = Exclude<SortKey, 'status'>;
+
+	let { data }: PageProps = $props();
+
+	let items = $derived(data.edges.items);
+	let total = $derived(data.edges.total);
+	let pageSize = $derived(data.filters.pageSize);
+	let currentPage = $derived(data.filters.page);
+	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
+	let loading = $derived(!!navigating.to);
+
+	let search = $state(data.filters.search);
+	let statusFilter = $state<StatusFilter>(data.filters.status as StatusFilter);
+	let sortKey = $state<SortKey>(data.filters.sort as SortKey);
+	let sortOrder = $state<'asc' | 'desc'>(data.filters.order);
+
+	$effect(() => {
+		search = data.filters.search;
+		statusFilter = data.filters.status as StatusFilter;
+		sortKey = data.filters.sort as SortKey;
+		sortOrder = data.filters.order;
+	});
 
 	let formOpen = $state(false);
 	let editingEdge = $state<Edge | null>(null);
@@ -38,63 +51,47 @@
 	let copiedId = $state<number | null>(null);
 	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
-	const offset = $derived((page - 1) * pageSize);
+	function applyFilters(overrides: {
+		search?: string;
+		status?: StatusFilter;
+		sort?: SortKey;
+		order?: 'asc' | 'desc';
+		page?: number;
+	}) {
+		const s = overrides.search ?? search;
+		const st = overrides.status ?? statusFilter;
+		const sk = overrides.sort ?? sortKey;
+		const so = overrides.order ?? sortOrder;
+		const p = overrides.page ?? 1;
 
-	async function load() {
-		loading = true;
-		try {
-			const res = await edgesApi.list({
-				search,
-				status: statusFilter,
-				limit: pageSize,
-				offset,
-				sort: sortKey,
-				order: sortOrder
-			});
-			items = res.items;
-			total = res.total;
-			selected = new Set([...selected].filter((id) => items.some((e) => e.id === id)));
-		} catch (err) {
-			toast.error('Gagal memuat data edge');
-			console.error(err);
-		} finally {
-			loading = false;
-		}
-	}
+		const params = new URLSearchParams();
+		if (s) params.set('search', s);
+		if (st !== 'all') params.set('status', st);
+		if (sk !== 'created_at') params.set('sort', sk);
+		if (so !== 'desc') params.set('order', so);
+		if (p > 1) params.set('page', String(p));
 
-	$effect(() => {
-		// re-fetch when filters / sort / page change
-		void search;
-		void statusFilter;
-		void sortKey;
-		void sortOrder;
-		void page;
-		load();
-	});
-
-	function resetPage() {
-		page = 1;
+		goto(params.toString() ? `/edges?${params}` : '/edges', { keepFocus: true });
 	}
 
 	function onSearch(v: string) {
 		search = v;
-		resetPage();
+		applyFilters({ search: v, page: 1 });
 	}
 
 	function onStatusChange(e: Event) {
 		statusFilter = (e.currentTarget as HTMLSelectElement).value as StatusFilter;
-		resetPage();
+		applyFilters({ status: statusFilter, page: 1 });
 	}
 
 	function onSortChange(key: SortKey) {
+		let order: 'asc' | 'desc';
 		if (sortKey === key) {
-			sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+			order = sortOrder === 'asc' ? 'desc' : 'asc';
 		} else {
-			sortKey = key;
-			sortOrder = key === 'name' || key === 'code' ? 'asc' : 'desc';
+			order = key === 'name' || key === 'code' ? 'asc' : 'desc';
 		}
-		resetPage();
+		applyFilters({ sort: key, order, page: 1 });
 	}
 
 	const allSelected = $derived(items.length > 0 && items.every((e) => selected.has(e.id)));
@@ -134,7 +131,7 @@
 			toast.success(`${ok} edge dihapus`);
 			bulkConfirmOpen = false;
 			selected = new Set();
-			await load();
+			await invalidateAll();
 		} finally {
 			bulkDeleting = false;
 		}
@@ -185,18 +182,18 @@
 		formOpen = true;
 	}
 
-	async function handleFormSubmit(data: EdgeFormData) {
+	async function handleFormSubmit(formData: EdgeFormData) {
 		try {
 			if (editingEdge) {
-				await edgesApi.update(editingEdge.id, data);
+				await edgesApi.update(editingEdge.id, formData);
 				toast.success(`Edge ${editingEdge.code} diperbarui`);
 			} else {
-				const created = await edgesApi.create(data);
+				const created = await edgesApi.create(formData);
 				toast.success(`Edge ${created.code} berhasil ditambahkan`);
 			}
 			formOpen = false;
 			editingEdge = null;
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error('Gagal menyimpan edge');
 			console.error(err);
@@ -214,7 +211,7 @@
 			await edgesApi.remove(deletingEdge.id);
 			toast.success(`Edge ${deletingEdge.code} dihapus`);
 			deletingEdge = null;
-			await load();
+			await invalidateAll();
 		} catch (err) {
 			toast.error('Gagal menghapus edge');
 			console.error(err);
@@ -247,7 +244,6 @@
 		return `${day} hari lalu`;
 	}
 
-	type SortableKey = Exclude<SortKey, 'status'>;
 	const columns: { key: SortableKey; label: string; align?: 'left' | 'right' }[] = [
 		{ key: 'code', label: 'Kode' },
 		{ key: 'name', label: 'Nama / Hostname' },
@@ -262,7 +258,7 @@
 
 <PageHeader title="Edges" description="Daftar node CCTV yang terdaftar di sistem">
 	{#snippet actions()}
-		<Button variant="secondary" onclick={() => load()} disabled={loading}>
+		<Button variant="secondary" onclick={() => invalidateAll()} disabled={loading}>
 			<svg
 				class="h-4 w-4 {loading ? 'animate-spin' : ''}"
 				fill="none"
@@ -577,13 +573,11 @@
 			</div>
 
 			<Pagination
-				page={page}
+				page={currentPage}
 				{totalPages}
 				{total}
 				{pageSize}
-				onchange={(p) => {
-					page = p;
-				}}
+				onchange={(p) => applyFilters({ page: p })}
 			/>
 		{/if}
 	</div>

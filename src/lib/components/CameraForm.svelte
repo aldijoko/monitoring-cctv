@@ -1,39 +1,37 @@
 <script lang="ts">
-	import { api } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 	import { toast } from '$lib/stores/toast';
 	import { listEdges } from '$lib/api/edges';
-	import type { Camera } from '$lib/api/cameras';
-	import type { Edge } from '$lib/api/edges';
+	import { createCamera, updateCamera, type CameraFormPayload } from '$lib/api/cameras';
+	import type { Edge, LiveCamera, StreamProtocol } from '$lib/types/api';
 	import { onMount } from 'svelte';
 
 	type Props = {
 		mode: 'create' | 'edit';
-		initial?: Camera | null;
-		lockedEdgeId?: string;
+		initial?: LiveCamera | null;
+		lockedEdgeId?: number;
 	};
 
 	let { mode, initial = null, lockedEdgeId }: Props = $props();
 
 	let edges = $state<Edge[]>([]);
-	let edgeId = $state(initial?.edge_id ?? lockedEdgeId ?? '');
+	let edgeId = $state<number | ''>(initial?.edge_id ?? lockedEdgeId ?? '');
 	let name = $state(initial?.name ?? '');
+	let channel = $state(initial?.channel ?? 1);
 	let sourceUrl = $state(initial?.source_url ?? '');
-	let username = $state(initial?.username ?? '');
-	let password = $state('');
-	let protocol = $state<'rtsp' | 'http' | 'hls' | 'onvif'>(initial?.protocol ?? 'rtsp');
-	let kind = $state<'live' | 'recording'>(initial?.kind ?? 'recording');
-	let position = $state(initial?.position ?? 0);
+	let streamProtocol = $state<StreamProtocol>(initial?.stream_protocol ?? 'hls');
+	let resolution = $state(initial?.resolution ?? '1920x1080');
+	let fps = $state(initial?.fps ?? 25);
+	let codec = $state(initial?.codec ?? 'H264');
+	let storageDays = $state(initial?.storage_days ?? 30);
 	let enabled = $state(initial?.enabled ?? true);
-	let detectEnabled = $state(initial?.detect_enabled ?? false);
-	let detectSensitivity = $state(initial?.detect_sensitivity ?? 0.5);
-	let recordingRetentionDays = $state(initial?.recording_retention_days ?? 14);
 	let saving = $state(false);
 	let errors = $state<Record<string, string>>({});
 
 	onMount(async () => {
 		try {
-			edges = await listEdges();
+			const res = await listEdges();
+			edges = res.items;
 			if (!edgeId && edges.length > 0) {
 				edgeId = edges[0].id;
 			}
@@ -47,7 +45,8 @@
 		if (!edgeId) e.edgeId = 'Pilih edge';
 		if (!name.trim()) e.name = 'Nama wajib diisi';
 		if (!sourceUrl.trim()) e.sourceUrl = 'Source URL wajib diisi';
-		else if (!/^(rtsp|http|https):\/\//.test(sourceUrl)) e.sourceUrl = 'URL harus rtsp/http/https';
+		else if (!/^(rtsp|rtsps|rtmp|rtmps|http|https):\/\//.test(sourceUrl))
+			e.sourceUrl = 'URL harus rtsp://, rtmp://, atau http(s):// (mis. HLS .m3u8)';
 		errors = e;
 		return Object.keys(e).length === 0;
 	}
@@ -57,25 +56,23 @@
 		if (!validate() || saving) return;
 		saving = true;
 		try {
-			const payload = {
-				edge_id: edgeId,
+			const payload: CameraFormPayload = {
+				edge_id: edgeId as number,
 				name: name.trim(),
+				channel,
 				source_url: sourceUrl.trim(),
-				username: username.trim() || null,
-				password: password || null,
-				protocol,
-				kind,
-				position,
-				enabled,
-				detect_enabled: detectEnabled,
-				detect_sensitivity: detectSensitivity,
-				recording_retention_days: recordingRetentionDays
+				stream_protocol: streamProtocol,
+				resolution,
+				fps,
+				codec,
+				storage_days: storageDays,
+				enabled
 			};
 			if (mode === 'create') {
-				await api.post('/api/v1/cameras', payload);
+				await createCamera(payload);
 				toast.success('Kamera berhasil ditambahkan');
 			} else if (initial) {
-				await api.put(`/api/v1/cameras/${initial.id}`, payload);
+				await updateCamera(initial.id, payload);
 				toast.success('Kamera diperbarui');
 			}
 			await goto(lockedEdgeId ? `/edges/${lockedEdgeId}` : '/cameras');
@@ -116,19 +113,19 @@
 					<input
 						type="text"
 						bind:value={name}
-						placeholder="Kamera Pintu Depan"
+						placeholder="CAM-01 Pintu Depan"
 						class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 					/>
 					{#if errors.name}<span class="mt-1 block text-xs text-red-600">{errors.name}</span>{/if}
 				</label>
 
 				<label class="block">
-					<span class="mb-1 block text-sm font-medium text-gray-700">Urutan Tampil</span>
+					<span class="mb-1 block text-sm font-medium text-gray-700">Channel</span>
 					<input
 						type="number"
-						bind:value={position}
-						min="0"
-						max="999"
+						bind:value={channel}
+						min="1"
+						max="99"
 						class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 					/>
 				</label>
@@ -139,90 +136,69 @@
 				<input
 					type="text"
 					bind:value={sourceUrl}
-					placeholder="rtsp://user:pass@192.168.1.100:554/stream1"
+					placeholder="rtsp://user:pass@203.0.113.10:20557/... atau https://host/stream/index.m3u8"
 					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 				/>
+				<span class="mt-1 block text-xs text-gray-500">
+					Bisa RTSP (kamera langsung) atau HLS/.m3u8 (sumber yang sudah di-stream pihak lain). Backend akan menariknya dan menyediakannya sebagai HLS untuk pemutaran.
+				</span>
 				{#if errors.sourceUrl}<span class="mt-1 block text-xs text-red-600">{errors.sourceUrl}</span>{/if}
 			</label>
-
-			<div class="grid gap-4 md:grid-cols-2">
-				<label class="block">
-					<span class="mb-1 block text-sm font-medium text-gray-700">Username</span>
-					<input
-						type="text"
-						bind:value={username}
-						placeholder="admin"
-						class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-					/>
-				</label>
-
-				<label class="block">
-					<span class="mb-1 block text-sm font-medium text-gray-700">
-						Password {mode === 'edit' ? '(kosongkan jika tidak diubah)' : ''}
-					</span>
-					<input
-						type="password"
-						bind:value={password}
-						placeholder="••••••••"
-						class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-					/>
-				</label>
-			</div>
 		</div>
 	</div>
 
 	<div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-		<h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">Mode & Deteksi</h2>
+		<h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">Output & Penyimpanan</h2>
 		<div class="grid gap-4 md:grid-cols-2">
 			<label class="block">
-				<span class="mb-1 block text-sm font-medium text-gray-700">Protokol</span>
+				<span class="mb-1 block text-sm font-medium text-gray-700">Protokol Output</span>
 				<select
-					bind:value={protocol}
+					bind:value={streamProtocol}
 					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 				>
-					<option value="rtsp">RTSP</option>
-					<option value="http">HTTP (MJPEG)</option>
 					<option value="hls">HLS</option>
-					<option value="onvif">ONVIF</option>
+					<option value="webrtc">WebRTC</option>
+					<option value="mjpeg">MJPEG</option>
 				</select>
 			</label>
 
 			<label class="block">
-				<span class="mb-1 block text-sm font-medium text-gray-700">Jenis</span>
-				<select
-					bind:value={kind}
-					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-				>
-					<option value="live">Hanya Live View</option>
-					<option value="recording">Live + Recording</option>
-				</select>
-			</label>
-		</div>
-
-		<label class="mt-4 flex items-center gap-2">
-			<input type="checkbox" bind:checked={detectEnabled} class="rounded border-gray-300" />
-			<span class="text-sm text-gray-700">Aktifkan deteksi gerakan</span>
-		</label>
-
-		{#if detectEnabled}
-			<label class="mt-3 block">
-				<span class="mb-1 block text-sm font-medium text-gray-700">Sensitivitas: {(detectSensitivity * 100).toFixed(0)}%</span>
+				<span class="mb-1 block text-sm font-medium text-gray-700">Resolusi</span>
 				<input
-					type="range"
-					bind:value={detectSensitivity}
-					min="0"
-					max="1"
-					step="0.05"
-					class="w-full"
+					type="text"
+					bind:value={resolution}
+					placeholder="1920x1080"
+					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
 				/>
 			</label>
-		{/if}
+
+			<label class="block">
+				<span class="mb-1 block text-sm font-medium text-gray-700">FPS</span>
+				<input
+					type="number"
+					bind:value={fps}
+					min="1"
+					max="60"
+					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+				/>
+			</label>
+
+			<label class="block">
+				<span class="mb-1 block text-sm font-medium text-gray-700">Codec</span>
+				<input
+					type="text"
+					bind:value={codec}
+					placeholder="H264"
+					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+				/>
+			</label>
+		</div>
 
 		<label class="mt-4 block">
 			<span class="mb-1 block text-sm font-medium text-gray-700">Retensi Rekaman (hari)</span>
 			<input
 				type="number"
-				bind:value={recordingRetentionDays}
+				bind:value={storageDays}
 				min="1"
 				max="365"
 				class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"

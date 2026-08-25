@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { navigating } from '$app/state';
 	import { toasts } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -9,91 +9,111 @@
 	import Button from '$lib/components/Button.svelte';
 	import { formatBytes, formatDuration, formatDateTime } from '$lib/utils/format';
 	import { recordingsApi } from '$lib/api/recordings';
-	import { edgesApi } from '$lib/api/edges';
-	import type { Recording, Edge } from '$lib/types/api';
-	import type { CameraOption } from '$lib/mocks/recordings';
+	import type { PageProps } from './$types';
 
-	let search = $state('');
-	let edgeFilter = $state<string>('all');
-	let cameraFilter = $state<string>('all');
-	let dateFrom = $state<string>('');
-	let dateTo = $state<string>('');
-	const pageSize = 10;
-	let page = $state(1);
-	const offset = $derived((page - 1) * pageSize);
-	let sort = $state<'started_at' | 'size_bytes' | 'duration_seconds' | 'edge_code'>(
-		'started_at'
-	);
-	let order = $state<'asc' | 'desc'>('desc');
+	type SortKey = 'started_at' | 'size_bytes' | 'duration_seconds' | 'edge_code';
 
-	let items = $state<Recording[]>([]);
-	let total = $state(0);
+	let { data }: PageProps = $props();
+
+	let items = $derived(data.recordings.items);
+	let total = $derived(data.recordings.total);
+	let pageSize = $derived(data.filters.pageSize);
+	let currentPage = $derived(data.filters.page);
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
-	let loading = $state(true);
-	let edges = $state<Edge[]>([]);
-	let cameras = $state<CameraOption[]>([]);
+	let loading = $derived(!!navigating.to);
+
+	let search = $state(data.filters.search);
+	let edgeFilter = $state(data.filters.edgeId);
+	let cameraFilter = $state(data.filters.cameraId);
+	let dateFrom = $state(data.filters.dateFrom);
+	let dateTo = $state(data.filters.dateTo);
+	let sort = $state<SortKey>(data.filters.sort as SortKey);
+	let order = $state<'asc' | 'desc'>(data.filters.order);
+
+	$effect(() => {
+		search = data.filters.search;
+		edgeFilter = data.filters.edgeId;
+		cameraFilter = data.filters.cameraId;
+		dateFrom = data.filters.dateFrom;
+		dateTo = data.filters.dateTo;
+		sort = data.filters.sort as SortKey;
+		order = data.filters.order;
+	});
+
 	let selectedIds = $state<number[]>([]);
 	let showArchiveDialog = $state(false);
 	let archiving = $state(false);
 	let archiveFormat = $state<'mp4' | 'zip'>('mp4');
 
-	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
 	const visibleCameras = $derived(
-		edgeFilter === 'all' ? cameras : cameras.filter((c) => c.edge_id === Number(edgeFilter))
+		edgeFilter === 'all' ? data.cameras : data.cameras.filter((c) => String(c.edge_id) === edgeFilter)
 	);
 
-	async function load() {
-		loading = true;
-		try {
-			const res = await recordingsApi.list({
-				search: search || undefined,
-				edge_id: edgeFilter === 'all' ? 'all' : Number(edgeFilter),
-				camera_id: cameraFilter === 'all' ? 'all' : Number(cameraFilter),
-				date_from: dateFrom || undefined,
-				date_to: dateTo || undefined,
-				limit: pageSize,
-				offset,
-				sort,
-				order
-			});
-			items = res.items;
-			total = res.total;
-			selectedIds = selectedIds.filter((id) => res.items.some((i) => i.id === id));
-		} catch (err) {
-			toasts.error((err as Error).message);
-		} finally {
-			loading = false;
-		}
+	function applyFilters(overrides: {
+		search?: string;
+		edgeId?: string;
+		cameraId?: string;
+		dateFrom?: string;
+		dateTo?: string;
+		sort?: SortKey;
+		order?: 'asc' | 'desc';
+		page?: number;
+	}) {
+		const s = overrides.search ?? search;
+		const eid = overrides.edgeId ?? edgeFilter;
+		const cid = overrides.cameraId ?? cameraFilter;
+		const df = overrides.dateFrom ?? dateFrom;
+		const dt = overrides.dateTo ?? dateTo;
+		const sk = overrides.sort ?? sort;
+		const so = overrides.order ?? order;
+		const p = overrides.page ?? 1;
+
+		const params = new URLSearchParams();
+		if (s) params.set('search', s);
+		if (eid !== 'all') params.set('edge_id', eid);
+		if (cid !== 'all') params.set('camera_id', cid);
+		if (df) params.set('date_from', df);
+		if (dt) params.set('date_to', dt);
+		if (sk !== 'started_at') params.set('sort', sk);
+		if (so !== 'desc') params.set('order', so);
+		if (p > 1) params.set('page', String(p));
+
+		goto(params.toString() ? `/recordings?${params}` : '/recordings', { keepFocus: true });
 	}
 
-	function handleSearchInput() {
+	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+	function handleSearchInput(e: Event) {
+		search = (e.currentTarget as HTMLInputElement).value;
 		if (debounceTimer) clearTimeout(debounceTimer);
-		debounceTimer = setTimeout(() => {
-			page = 1;
-			load();
-		}, 300);
+		debounceTimer = setTimeout(() => applyFilters({ search, page: 1 }), 300);
 	}
 
-	function handleFilterChange() {
-		page = 1;
-		if (cameraFilter !== 'all' && edgeFilter !== 'all') {
-			const cam = cameras.find((c) => c.id === Number(cameraFilter));
-			if (cam && cam.edge_id !== Number(edgeFilter)) {
-				cameraFilter = 'all';
-			}
-		}
-		load();
+	function handleEdgeChange(e: Event) {
+		edgeFilter = (e.currentTarget as HTMLSelectElement).value;
+		// reset camera filter if it no longer belongs to the selected edge
+		const cam = data.cameras.find((c) => String(c.id) === cameraFilter);
+		const nextCamera = cam && String(cam.edge_id) !== edgeFilter ? 'all' : cameraFilter;
+		applyFilters({ edgeId: edgeFilter, cameraId: nextCamera, page: 1 });
 	}
 
-	function handleSort(col: typeof sort) {
-		if (sort === col) {
-			order = order === 'asc' ? 'desc' : 'asc';
-		} else {
-			sort = col;
-			order = 'desc';
-		}
-		load();
+	function handleCameraChange(e: Event) {
+		cameraFilter = (e.currentTarget as HTMLSelectElement).value;
+		applyFilters({ cameraId: cameraFilter, page: 1 });
+	}
+
+	function handleDateFromChange(e: Event) {
+		dateFrom = (e.currentTarget as HTMLInputElement).value;
+		applyFilters({ dateFrom, page: 1 });
+	}
+
+	function handleDateToChange(e: Event) {
+		dateTo = (e.currentTarget as HTMLInputElement).value;
+		applyFilters({ dateTo, page: 1 });
+	}
+
+	function handleSort(col: SortKey) {
+		const nextOrder = sort === col ? (order === 'asc' ? 'desc' : 'asc') : 'desc';
+		applyFilters({ sort: col, order: nextOrder, page: 1 });
 	}
 
 	function toggleSelect(id: number) {
@@ -146,22 +166,10 @@
 		goto(`/recordings/${id}`);
 	}
 
-	function sortIcon(col: typeof sort) {
+	function sortIcon(col: SortKey) {
 		if (sort !== col) return '↕';
 		return order === 'asc' ? '↑' : '↓';
 	}
-
-	onMount(async () => {
-		try {
-			[edges, cameras] = await Promise.all([
-				edgesApi.list().then((p) => p.items),
-				recordingsApi.cameras()
-			]);
-			await load();
-		} catch (err) {
-			toasts.error((err as Error).message);
-		}
-	});
 </script>
 
 <svelte:head>
@@ -200,24 +208,24 @@
 					type="search"
 					placeholder="Cari filename, edge, atau camera..."
 					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none"
-					bind:value={search}
+					value={search}
 					oninput={handleSearchInput}
 				/>
 			</div>
 			<select
 				class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none"
-				bind:value={edgeFilter}
-				onchange={handleFilterChange}
+				value={edgeFilter}
+				onchange={handleEdgeChange}
 			>
 				<option value="all">Semua Edge</option>
-				{#each edges as edge (edge.id)}
+				{#each data.edges as edge (edge.id)}
 					<option value={String(edge.id)}>{edge.code} — {edge.name}</option>
 				{/each}
 			</select>
 			<select
 				class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none"
-				bind:value={cameraFilter}
-				onchange={handleFilterChange}
+				value={cameraFilter}
+				onchange={handleCameraChange}
 				disabled={visibleCameras.length === 0}
 			>
 				<option value="all">Semua Camera</option>
@@ -230,15 +238,15 @@
 					type="date"
 					aria-label="Dari tanggal"
 					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none"
-					bind:value={dateFrom}
-					onchange={handleFilterChange}
+					value={dateFrom}
+					onchange={handleDateFromChange}
 				/>
 				<input
 					type="date"
 					aria-label="Sampai tanggal"
 					class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none"
-					bind:value={dateTo}
-					onchange={handleFilterChange}
+					value={dateTo}
+					onchange={handleDateToChange}
 				/>
 			</div>
 		</div>
@@ -356,14 +364,11 @@
 		</div>
 
 		<Pagination
-			{page}
+			page={currentPage}
 			{totalPages}
 			{total}
 			{pageSize}
-			onchange={(p) => {
-				page = p;
-				load();
-			}}
+			onchange={(p) => applyFilters({ page: p })}
 		/>
 	</section>
 </div>

@@ -1,48 +1,12 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { enhance } from '$app/forms';
 	import Button from '$lib/components/Button.svelte';
 	import Input from '$lib/components/Input.svelte';
-	import { setSession, isAuthenticated } from '$lib/stores/auth';
-	import { toasts } from '$lib/stores/toast';
+	import type { ActionData } from './$types';
 
-	let username = $state('admin');
-	let password = $state('admin');
+	let { form }: { form: ActionData } = $props();
+
 	let loading = $state(false);
-	let error = $state<string | null>(null);
-
-	onMount(() => {
-		if ($isAuthenticated) {
-			goto('/dashboard', { replaceState: true });
-		}
-	});
-
-	function handleSubmit(e: Event) {
-		e.preventDefault();
-		error = null;
-
-		if (!username || !password) {
-			error = 'Username dan password wajib diisi';
-			return;
-		}
-
-		loading = true;
-		setSession({
-			access_token: 'static-token',
-			refresh_token: 'static-refresh-token',
-			user: {
-				id: 1,
-				username,
-				email: `${username}@local`,
-				role: 'admin',
-				tenant_id: 1,
-				is_active: true,
-				created_at: new Date().toISOString()
-			}
-		});
-		toasts.success(`Selamat datang, ${username}`);
-		goto('/dashboard');
-	}
 </script>
 
 <div
@@ -72,11 +36,22 @@
 		</div>
 
 		<div class="card p-8">
-			<form onsubmit={handleSubmit} class="space-y-4">
+			<form
+				method="POST"
+				class="space-y-4"
+				use:enhance={() => {
+					loading = true;
+					return async ({ update }) => {
+						await update();
+						loading = false;
+					};
+				}}
+			>
 				<Input
 					label="Username"
+					name="username"
 					type="text"
-					bind:value={username}
+					value={form?.username ?? 'admin'}
 					placeholder="admin"
 					autocomplete="username"
 					required
@@ -85,23 +60,23 @@
 
 				<Input
 					label="Password"
+					name="password"
 					type="password"
-					bind:value={password}
 					placeholder="••••••••"
 					autocomplete="current-password"
 					required
 					disabled={loading}
 				/>
 
-				{#if error}
+				{#if form?.error}
 					<div
 						class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
 					>
-						{error}
+						{form.error}
 					</div>
 				{/if}
 
-				<Button type="submit" {loading} class="w-full">
+				<Button type="submit" {loading} fullWidth>
 					{loading ? 'Memproses...' : 'Masuk'}
 				</Button>
 			</form>

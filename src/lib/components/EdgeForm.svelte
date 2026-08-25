@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api } from '$lib/api/client';
+	import { edgesApi } from '$lib/api/edges';
 	import { toast } from '$lib/stores/toast';
 	import { goto } from '$app/navigation';
 	import type { Edge } from '$lib/types/api';
@@ -46,8 +46,8 @@
 			const payload = buildPayload();
 			const result =
 				mode === 'create'
-					? await api.post<Edge>('/api/v1/edges', payload)
-					: await api.put<Edge>(`/api/v1/edges/${initial!.id}`, payload);
+					? await edgesApi.create(payload)
+					: await edgesApi.update(initial!.id, payload);
 			toast.success(
 				mode === 'create' ? `Edge ${result.code} berhasil ditambahkan` : 'Edge diperbarui'
 			);

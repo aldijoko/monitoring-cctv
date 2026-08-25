@@ -1,15 +1,17 @@
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from './client';
 import type { User, UserRole, Paginated } from '$lib/types/api';
-import { usersMock, type UserListParams } from '$lib/mocks/users';
 
 export type { User, UserRole } from '$lib/types/api';
 
-/**
- * Users API client.
- *
- * Saat ini masih menggunakan mock data di-memory + localStorage.
- * Untuk produksi, ganti body fungsi di bawah dengan `request<...>('/admin/users', ...)`.
- * Signature & return type dijaga identik agar swap hanya di satu tempat.
- */
+export interface UserListParams {
+	search?: string;
+	role?: UserRole | 'all';
+	is_active?: boolean;
+	limit?: number;
+	offset?: number;
+	sort?: 'username' | 'email' | 'role' | 'created_at';
+	order?: 'asc' | 'desc';
+}
 
 export interface UserFormData {
 	username: string;
@@ -27,34 +29,36 @@ export interface UserUpdateData {
 
 export const usersApi = {
 	list(params: UserListParams = {}): Promise<Paginated<User>> {
-		return usersMock.list(params);
+		return apiGet<Paginated<User>>('/users', {
+			search: params.search,
+			role: params.role === 'all' ? undefined : params.role,
+			is_active: params.is_active,
+			limit: params.limit,
+			offset: params.offset
+		});
 	},
 
 	get(id: number): Promise<User | null> {
-		return usersMock.get(id);
+		return apiGet<User>(`/users/${id}`);
 	},
 
 	create(data: UserFormData): Promise<User> {
-		return usersMock.create(data);
+		return apiPost<User, UserFormData>('/users', data);
 	},
 
 	update(id: number, data: UserUpdateData): Promise<User> {
-		return usersMock.update(id, data);
+		return apiPut<User, UserUpdateData>(`/users/${id}`, data);
 	},
 
 	remove(id: number): Promise<void> {
-		return usersMock.remove(id);
+		return apiDelete(`/users/${id}`);
 	},
 
 	setActive(id: number, is_active: boolean): Promise<User> {
-		return usersMock.setActive(id, is_active);
+		return apiPatch<User, { is_active: boolean }>(`/users/${id}/active`, { is_active });
 	},
 
 	resetPassword(id: number): Promise<{ temporary_password: string }> {
-		return usersMock.resetPassword(id);
-	},
-
-	reset(): Promise<void> {
-		return usersMock.reset();
+		return apiPost<{ temporary_password: string }>(`/users/${id}/reset-password`);
 	}
 };

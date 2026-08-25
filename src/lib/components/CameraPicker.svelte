@@ -1,11 +1,11 @@
 <script lang="ts">
-	import type { StreamInfo } from '$lib/types/livestream';
+	import type { LiveCamera } from '$lib/types/api';
 
 	type Props = {
-		streams: StreamInfo[];
-		selected?: string[];
+		streams: LiveCamera[];
+		selected?: number[];
 		disabled?: boolean;
-		onpick?: (id: string) => void;
+		onpick?: (id: number) => void;
 		onclose?: () => void;
 	};
 
@@ -20,17 +20,15 @@
 	let search = $state('');
 
 	let filtered = $derived(
-		streams.filter((c) =>
-			search ? c.camera_name.toLowerCase().includes(search.toLowerCase()) : true
-		)
+		streams.filter((c) => (search ? c.name.toLowerCase().includes(search.toLowerCase()) : true))
 	);
 
-	function toggle(id: string) {
+	function toggle(id: number) {
 		if (disabled) return;
 		selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
 	}
 
-	function pick(id: string) {
+	function pick(id: number) {
 		if (onpick) onpick(id);
 		else toggle(id);
 	}
@@ -81,10 +79,8 @@
 						{disabled}
 					/>
 					<div class="flex-1">
-						<div class="text-sm font-medium text-gray-900">{stream.camera_name}</div>
-						{#if stream.location}
-							<div class="text-xs text-gray-500">{stream.location}</div>
-						{/if}
+						<div class="text-sm font-medium text-gray-900">{stream.name}</div>
+						<div class="text-xs text-gray-500">{stream.edge_name}</div>
 					</div>
 					{#if stream.status !== 'online'}
 						<span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
