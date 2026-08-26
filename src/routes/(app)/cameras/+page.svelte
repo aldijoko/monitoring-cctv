@@ -6,6 +6,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import type { LiveCamera, CameraStatus } from '$lib/types/api';
 	import type { PageProps } from './$types';
 
@@ -15,17 +16,24 @@
 	let filterStatus = $state<'' | CameraStatus>(data.filters.status);
 	let loading = $derived(!!navigating.to);
 
+	let total = $derived(data.total);
+	let pageSize = $derived(data.filters.pageSize);
+	let currentPage = $derived(data.filters.page);
+	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
+
 	$effect(() => {
 		search = data.filters.search;
 		filterStatus = data.filters.status;
 	});
 
-	function applyFilters(overrides: { search?: string; status?: '' | CameraStatus }) {
+	function applyFilters(overrides: { search?: string; status?: '' | CameraStatus; page?: number }) {
 		const s = overrides.search ?? search;
 		const st = overrides.status ?? filterStatus;
+		const p = overrides.page ?? 1;
 		const params = new URLSearchParams();
 		if (s) params.set('search', s);
 		if (st) params.set('status', st);
+		if (p > 1) params.set('page', String(p));
 		goto(params.toString() ? `/cameras?${params}` : '/cameras', { keepFocus: true });
 	}
 
@@ -33,20 +41,18 @@
 	function onSearchInput(e: Event) {
 		search = (e.currentTarget as HTMLInputElement).value;
 		if (searchDebounce) clearTimeout(searchDebounce);
-		searchDebounce = setTimeout(() => applyFilters({ search }), 300);
+		searchDebounce = setTimeout(() => applyFilters({ search, page: 1 }), 300);
 	}
 
 	function onStatusChange(e: Event) {
 		filterStatus = (e.currentTarget as HTMLSelectElement).value as '' | CameraStatus;
-		applyFilters({ status: filterStatus });
+		applyFilters({ status: filterStatus, page: 1 });
 	}
 
 	async function toggleActive(camera: LiveCamera) {
 		try {
 			await updateCamera(camera.id, { enabled: !camera.enabled });
-			toast.success(
-				`Kamera ${camera.name} ${!camera.enabled ? 'diaktifkan' : 'dinonaktifkan'}`
-			);
+			toast.success(`Kamera ${camera.name} ${!camera.enabled ? 'diaktifkan' : 'dinonaktifkan'}`);
 			await invalidateAll();
 		} catch (err) {
 			toast.error((err as Error).message);
@@ -142,7 +148,10 @@
 				{#each data.cameras as camera (camera.id)}
 					<tr class="hover:bg-gray-50">
 						<td class="px-4 py-3">
-							<a href="/cameras/{camera.id}" class="font-medium text-gray-900 hover:text-indigo-600">
+							<a
+								href="/cameras/{camera.id}"
+								class="font-medium text-gray-900 hover:text-indigo-600"
+							>
 								{camera.name}
 							</a>
 							<div class="text-xs text-gray-400">{camera.codec}</div>
@@ -189,5 +198,12 @@
 				{/each}
 			</tbody>
 		</table>
+		<Pagination
+			page={currentPage}
+			{totalPages}
+			{total}
+			{pageSize}
+			onchange={(p) => applyFilters({ page: p })}
+		/>
 	</div>
 {/if}

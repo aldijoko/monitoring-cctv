@@ -2,6 +2,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from './client';
 import type { Edge, Paginated } from '$lib/types/api';
 
 export interface EdgeFormData {
+	code: string;
 	name: string;
 	hostname?: string;
 	ip_address?: string;

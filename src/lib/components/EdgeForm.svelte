@@ -1,20 +1,18 @@
 <script lang="ts">
-	import { edgesApi } from '$lib/api/edges';
-	import { toast } from '$lib/stores/toast';
-	import { goto } from '$app/navigation';
 	import type { Edge } from '$lib/types/api';
+	import type { EdgeFormData } from '$lib/api/edges';
 
 	type Props = {
 		mode: 'create' | 'edit';
 		initial?: Edge | null;
-		onsaved?: (edge: Edge) => void;
-		oncancel?: () => void;
+		onsaved: (data: EdgeFormData) => Promise<void> | void;
+		oncancel: () => void;
 	};
 
 	let { mode, initial = null, onsaved, oncancel }: Props = $props();
 
-	let name = $state(initial?.name ?? '');
 	let code = $state(initial?.code ?? '');
+	let name = $state(initial?.name ?? '');
 	let hostname = $state(initial?.hostname ?? '');
 	let ipAddress = $state(initial?.ip_address ?? '');
 	let saving = $state(false);
@@ -22,20 +20,11 @@
 
 	function validate(): boolean {
 		const e: Record<string, string> = {};
-		if (!name.trim()) e.name = 'Nama wajib diisi';
 		if (!code.trim()) e.code = 'Kode wajib diisi';
+		if (!name.trim()) e.name = 'Nama wajib diisi';
 		if (ipAddress && !/^[\d.]+$/.test(ipAddress.trim())) e.ipAddress = 'IP address tidak valid';
 		errors = e;
 		return Object.keys(e).length === 0;
-	}
-
-	function buildPayload() {
-		return {
-			name: name.trim(),
-			code: code.trim().toUpperCase(),
-			hostname: hostname.trim() || undefined,
-			ip_address: ipAddress.trim() || undefined
-		};
 	}
 
 	async function handleSubmit(event: Event) {
@@ -43,19 +32,12 @@
 		if (!validate() || saving) return;
 		saving = true;
 		try {
-			const payload = buildPayload();
-			const result =
-				mode === 'create'
-					? await edgesApi.create(payload)
-					: await edgesApi.update(initial!.id, payload);
-			toast.success(
-				mode === 'create' ? `Edge ${result.code} berhasil ditambahkan` : 'Edge diperbarui'
-			);
-			if (onsaved) {
-				onsaved(result);
-			} else {
-				await goto('/edges');
-			}
+			await onsaved({
+				code: code.trim().toUpperCase(),
+				name: name.trim(),
+				hostname: hostname.trim() || undefined,
+				ip_address: ipAddress.trim() || undefined
+			});
 		} catch (err) {
 			errors = { _form: (err as Error).message };
 		} finally {
@@ -79,7 +61,7 @@
 				bind:value={code}
 				placeholder="KPL-001"
 				disabled={mode === 'edit'}
-				class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono uppercase focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
+				class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono uppercase focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-500"
 			/>
 			{#if errors.code}
 				<span class="mt-1 block text-xs text-red-600">{errors.code}</span>
@@ -124,23 +106,14 @@
 	</div>
 
 	<div class="flex justify-end gap-2 pt-2">
-		{#if oncancel}
-			<button
-				type="button"
-				onclick={oncancel}
-				disabled={saving}
-				class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-			>
-				Batal
-			</button>
-		{:else}
-			<a
-				href="/edges"
-				class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-			>
-				Batal
-			</a>
-		{/if}
+		<button
+			type="button"
+			onclick={oncancel}
+			disabled={saving}
+			class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+		>
+			Batal
+		</button>
 		<button
 			type="submit"
 			disabled={saving}

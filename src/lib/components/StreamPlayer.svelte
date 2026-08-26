@@ -12,6 +12,9 @@
 		autoplay?: boolean;
 		muted?: boolean;
 		controls?: boolean;
+		/** Fill the parent's height instead of locking to a 16:9 box — for
+		 * containers with an explicit height, e.g. a fullscreen overlay. */
+		fill?: boolean;
 		onerror?: (msg: string) => void;
 		onstatuschange?: (s: PlaybackStatus) => void;
 	};
@@ -23,6 +26,7 @@
 		autoplay = true,
 		muted = true,
 		controls = true,
+		fill = false,
 		onerror,
 		onstatuschange
 	}: Props = $props();
@@ -93,7 +97,7 @@
 	});
 </script>
 
-<div class="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+<div class="relative w-full overflow-hidden rounded-lg bg-black {fill ? 'h-full' : 'aspect-video'}">
 	<video
 		bind:this={video}
 		{poster}

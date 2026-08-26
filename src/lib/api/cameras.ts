@@ -10,13 +10,17 @@ export interface CameraFilters {
 	edge_id?: number;
 	status?: string;
 	q?: string;
+	limit?: number;
+	offset?: number;
 }
 
 export async function listCameras(params?: CameraFilters): Promise<CameraListResponse> {
 	return apiGet<CameraListResponse>('/cameras', {
 		edge_id: params?.edge_id,
 		status: params?.status,
-		q: params?.q
+		q: params?.q,
+		limit: params?.limit,
+		offset: params?.offset
 	});
 }
 

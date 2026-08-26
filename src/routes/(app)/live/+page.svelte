@@ -1,43 +1,92 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import StreamPlayer, { type PlaybackStatus } from '$lib/components/StreamPlayer.svelte';
 	import CameraPicker from '$lib/components/CameraPicker.svelte';
 	import { listCameras } from '$lib/api/cameras';
 	import type { LiveCamera } from '$lib/types/api';
 	import type { PageProps } from './$types';
 
-	type Layout = '1x1' | '2x2' | '3x3' | '4x4';
+	type Preset = '1x1' | '2x2' | '3x3' | '4x4';
+	type MosaicKey = 'mosaic-1-5';
+	type Layout = Preset | MosaicKey | 'custom';
+
+	const presetDims: Record<Preset, { cols: number; rows: number }> = {
+		'1x1': { cols: 1, rows: 1 },
+		'2x2': { cols: 2, rows: 2 },
+		'3x3': { cols: 3, rows: 3 },
+		'4x4': { cols: 4, rows: 4 }
+	};
+
+	// A mosaic layout isn't a uniform grid: one tile is large, the rest are
+	// small and arranged around it — matches how most NVR walls do a
+	// "spotlight" view. Positioned via CSS grid-template-areas rather than
+	// the uniform grid-template-columns/rows the presets use.
+	interface MosaicSpec {
+		label: string;
+		slots: number;
+		columns: string;
+		rows: string;
+		areas: string;
+		/** grid-area name for each slot index, in fill order. */
+		order: string[];
+	}
+
+	const mosaicSpecs: Record<MosaicKey, MosaicSpec> = {
+		'mosaic-1-5': {
+			label: '1+5',
+			slots: 6,
+			columns: 'repeat(3, 1fr)',
+			rows: 'repeat(3, 1fr)',
+			areas: '"main main r1" "main main r2" "s1 s2 r3"',
+			order: ['main', 'r1', 'r2', 'r3', 's1', 's2']
+		}
+	};
+
+	const CUSTOM_KEY = 'cctv.live.customGrid';
+	const MIN_DIM = 1;
+	const MAX_DIM = 8;
+
+	function loadCustomDims(): { cols: number; rows: number } {
+		if (browser) {
+			try {
+				const raw = localStorage.getItem(CUSTOM_KEY);
+				if (raw) {
+					const parsed = JSON.parse(raw);
+					if (parsed?.cols && parsed?.rows) return parsed;
+				}
+			} catch {
+				// ignore malformed value, fall through to default
+			}
+		}
+		return { cols: 3, rows: 2 };
+	}
 
 	let { data }: PageProps = $props();
 
 	let streams = $state<LiveCamera[]>(data.cameras);
 	let selected = $state<number[]>([]);
 	let layout = $state<Layout>('2x2');
+	let customDims = $state(loadCustomDims());
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let showPicker = $state(false);
 	let fullscreenStreamId = $state<number | null>(null);
 	let playbackStatus = $state<Record<number, PlaybackStatus>>({});
 
-	const maxSlots: Record<Layout, number> = {
-		'1x1': 1,
-		'2x2': 4,
-		'3x3': 9,
-		'4x4': 16
-	};
+	const mosaic = $derived(layout in mosaicSpecs ? mosaicSpecs[layout as MosaicKey] : null);
+	const gridDims = $derived(
+		layout === 'custom' ? customDims : mosaic ? null : presetDims[layout as Preset]
+	);
+	const maxSlots = $derived(mosaic ? mosaic.slots : gridDims!.cols * gridDims!.rows);
+	const gridStyle = $derived(
+		mosaic
+			? `grid-template-columns: ${mosaic.columns}; grid-template-rows: ${mosaic.rows}; grid-template-areas: ${mosaic.areas};`
+			: `grid-template-columns: repeat(${gridDims!.cols}, minmax(0, 1fr)); grid-template-rows: repeat(${gridDims!.rows}, minmax(0, 1fr));`
+	);
 
-	const gridCols: Record<Layout, string> = {
-		'1x1': 'grid-cols-1',
-		'2x2': 'grid-cols-2',
-		'3x3': 'grid-cols-3',
-		'4x4': 'grid-cols-4'
-	};
-
-	const gridRows: Record<Layout, string> = {
-		'1x1': 'grid-rows-1',
-		'2x2': 'grid-rows-2',
-		'3x3': 'grid-rows-3',
-		'4x4': 'grid-rows-4'
-	};
+	function areaFor(index: number): string | undefined {
+		return mosaic?.order[index];
+	}
 
 	async function loadStreams() {
 		loading = true;
@@ -52,11 +101,16 @@
 		}
 	}
 
+	function trimSelectionToSlots() {
+		if (selected.length > maxSlots) {
+			selected = selected.slice(0, maxSlots);
+		}
+	}
+
 	function handlePickCamera(streamId: number) {
-		const slot = maxSlots[layout];
 		if (selected.includes(streamId)) {
 			selected = selected.filter((x) => x !== streamId);
-		} else if (selected.length < slot) {
+		} else if (selected.length < maxSlots) {
 			selected = [...selected, streamId];
 		} else {
 			// Replace first
@@ -65,8 +119,7 @@
 	}
 
 	function autoFill() {
-		const slot = maxSlots[layout];
-		selected = streams.slice(0, slot).map((s) => s.id);
+		selected = streams.slice(0, maxSlots).map((s) => s.id);
 	}
 
 	function clearAll() {
@@ -79,10 +132,16 @@
 
 	function onLayoutChange(newLayout: Layout) {
 		layout = newLayout;
-		const slot = maxSlots[newLayout];
-		if (selected.length > slot) {
-			selected = selected.slice(0, slot);
+		trimSelectionToSlots();
+	}
+
+	function onCustomDimChange(dim: 'cols' | 'rows', value: number) {
+		const clamped = Math.min(MAX_DIM, Math.max(MIN_DIM, Math.round(value) || MIN_DIM));
+		customDims = { ...customDims, [dim]: clamped };
+		if (browser) {
+			localStorage.setItem(CUSTOM_KEY, JSON.stringify(customDims));
 		}
+		trimSelectionToSlots();
 	}
 
 	function toggleFullscreen(streamId: number) {
@@ -98,18 +157,20 @@
 
 <div class="flex h-full flex-col gap-3 p-4">
 	<!-- Toolbar -->
-	<div class="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+	<div
+		class="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm"
+	>
 		<div class="flex items-center gap-3">
 			<h1 class="text-lg font-semibold text-gray-900">Live Monitoring</h1>
 			<span class="text-sm text-gray-500">
-				{selected.length} / {maxSlots[layout]} kamera
+				{selected.length} / {maxSlots} kamera
 			</span>
 		</div>
 
 		<div class="flex flex-wrap items-center gap-2">
 			<!-- Layout switcher -->
 			<div class="inline-flex rounded-md border border-gray-200 bg-white p-0.5">
-				{#each ['1x1', '2x2', '3x3', '4x4'] as l (l)}
+				{#each ['1x1', '2x2', '3x3', '4x4', 'mosaic-1-5', 'custom'] as l (l)}
 					<button
 						type="button"
 						class="rounded px-2.5 py-1 text-xs font-medium transition {layout === l
@@ -117,11 +178,38 @@
 							: 'text-gray-600 hover:bg-gray-100'}"
 						onclick={() => onLayoutChange(l as Layout)}
 						aria-pressed={layout === l}
+						title={l === 'mosaic-1-5' ? '1 kamera besar + 5 kecil' : undefined}
 					>
-						{l}
+						{l === 'custom' ? 'Custom' : l === 'mosaic-1-5' ? mosaicSpecs['mosaic-1-5'].label : l}
 					</button>
 				{/each}
 			</div>
+
+			{#if layout === 'custom'}
+				<div class="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1">
+					<input
+						type="number"
+						min={MIN_DIM}
+						max={MAX_DIM}
+						value={customDims.cols}
+						onchange={(e) =>
+							onCustomDimChange('cols', Number((e.currentTarget as HTMLInputElement).value))}
+						aria-label="Jumlah kolom"
+						class="w-10 rounded border border-gray-200 px-1 py-0.5 text-center text-xs focus:border-blue-500 focus:outline-none"
+					/>
+					<span class="text-xs text-gray-400">×</span>
+					<input
+						type="number"
+						min={MIN_DIM}
+						max={MAX_DIM}
+						value={customDims.rows}
+						onchange={(e) =>
+							onCustomDimChange('rows', Number((e.currentTarget as HTMLInputElement).value))}
+						aria-label="Jumlah baris"
+						class="w-10 rounded border border-gray-200 px-1 py-0.5 text-center text-xs focus:border-blue-500 focus:outline-none"
+					/>
+				</div>
+			{/if}
 
 			<button
 				type="button"
@@ -154,8 +242,18 @@
 				disabled={loading}
 				aria-label="Refresh"
 			>
-				<svg class="h-4 w-4 {loading ? 'animate-spin' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+				<svg
+					class="h-4 w-4 {loading ? 'animate-spin' : ''}"
+					fill="none"
+					stroke="currentColor"
+					viewBox="0 0 24 24"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+					/>
 				</svg>
 			</button>
 		</div>
@@ -171,16 +269,31 @@
 
 	<!-- Grid -->
 	{#if loading}
-		<div class="grid min-h-0 flex-1 gap-3 {gridCols[layout]} {gridRows[layout]}">
-			{#each Array(maxSlots[layout]) as _, i (i)}
-				<div class="min-h-0 animate-pulse rounded-lg bg-gray-200"></div>
+		<div class="grid min-h-0 flex-1 gap-3" style={gridStyle}>
+			{#each Array(maxSlots) as _, i (i)}
+				<div
+					class="min-h-0 animate-pulse rounded-lg bg-gray-200"
+					style={areaFor(i) ? `grid-area: ${areaFor(i)}` : undefined}
+				></div>
 			{/each}
 		</div>
 	{:else if selectedStreams.length === 0}
-		<div class="flex min-h-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white">
+		<div
+			class="flex min-h-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white"
+		>
 			<div class="text-center">
-				<svg class="mx-auto h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+				<svg
+					class="mx-auto h-10 w-10 text-gray-400"
+					fill="none"
+					stroke="currentColor"
+					viewBox="0 0 24 24"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="1.5"
+						d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+					/>
 				</svg>
 				<h3 class="mt-2 text-sm font-medium text-gray-900">Belum ada kamera dipilih</h3>
 				<p class="mt-1 text-sm text-gray-500">Klik "+ Pilih Kamera" untuk mulai monitoring</p>
@@ -194,10 +307,12 @@
 			</div>
 		</div>
 	{:else}
-		<div class="grid min-h-0 flex-1 gap-3 {gridCols[layout]} {gridRows[layout]}">
-			{#each selectedStreams as stream (stream.id)}
+		<div class="grid min-h-0 flex-1 gap-3" style={gridStyle}>
+			{#each selectedStreams as stream, i (stream.id)}
 				<div
-					class="group relative min-h-0 overflow-hidden rounded-lg bg-black shadow-md ring-1 ring-gray-900/5"
+					class="group min-h-0 overflow-hidden rounded-lg bg-black shadow-md ring-1 ring-gray-900/5"
+					style={areaFor(i) ? `grid-area: ${areaFor(i)}` : undefined}
+					class:relative={fullscreenStreamId !== stream.id}
 					class:fixed={fullscreenStreamId === stream.id}
 					class:inset-0={fullscreenStreamId === stream.id}
 					class:z-50={fullscreenStreamId === stream.id}
@@ -206,6 +321,7 @@
 						{stream}
 						controls={false}
 						muted
+						fill={fullscreenStreamId === stream.id}
 						onstatuschange={(s) => onStatusChange(stream.id, s)}
 					/>
 					<!-- Fullscreen toggle -->
@@ -217,11 +333,21 @@
 					>
 						{#if fullscreenStreamId === stream.id}
 							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M6 18L18 6M6 6l12 12"
+								/>
 							</svg>
 						{:else}
 							<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+								/>
 							</svg>
 						{/if}
 					</button>
@@ -229,15 +355,23 @@
 			{/each}
 
 			<!-- Empty slot hints -->
-			{#each Array(maxSlots[layout] - selectedStreams.length) as _, i (i)}
+			{#each Array(maxSlots - selectedStreams.length) as _, i (i)}
 				<button
 					type="button"
 					class="flex aspect-video items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white text-gray-400 transition hover:border-blue-400 hover:text-blue-500"
+					style={areaFor(selectedStreams.length + i)
+						? `grid-area: ${areaFor(selectedStreams.length + i)}`
+						: undefined}
 					onclick={() => (showPicker = true)}
 				>
 					<div class="text-center">
 						<svg class="mx-auto h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M12 4v16m8-8H4"
+							/>
 						</svg>
 						<span class="mt-1 block text-xs">Tambah kamera</span>
 					</div>
