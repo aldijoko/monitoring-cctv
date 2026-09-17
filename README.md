@@ -13,13 +13,21 @@ SvelteKit 2 + Svelte 5 + Tailwind CSS 3 admin panel untuk CCTV monitoring platfo
 ## Setup
 
 ```bash
-cd frontend
 npm install
 cp .env.example .env
 npm run dev
 ```
 
 App berjalan di `http://localhost:5173`. Vite memproxy `/api/*` ke backend di `http://localhost:8000`.
+
+Frontend butuh backend jalan duluan (server-side load functions langsung fetch ke `API_BASE_URL`, lihat `.env.example`) — lihat repo `backend-monitoring` (sibling repo, [CLAUDE.md](CLAUDE.md)-nya juga referensi ke sana) untuk cara menjalankannya lewat Docker:
+
+```bash
+cd ../backend-monitoring
+docker compose up --build
+```
+
+Frontend ini sendiri **tidak** ikut di-docker — tetap dijalankan native lewat `npm run dev` seperti di atas.
 
 ## Skrip
 

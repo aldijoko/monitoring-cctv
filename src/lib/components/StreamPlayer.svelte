@@ -43,6 +43,31 @@
 		onstatuschange?.(s);
 	}
 
+	// Detects a stalled-but-technically-"playing" video: the source flaking
+	// out (common for these pulled public feeds — see mediamtx_service.go's
+	// alwaysAvailable comment) doesn't always fire the native `waiting`
+	// event, e.g. when the last decoded frame just never advances instead of
+	// the buffer visibly emptying. Without this, a tile freezes with no
+	// visual indicator at all — same failure mode as a silent full-black
+	// tile, just harder to notice. Polls currentTime instead of relying on
+	// `waiting`/`playing` alone.
+	let stallTimer: ReturnType<typeof setInterval> | null = null;
+	let lastCurrentTime = 0;
+
+	function startStallWatchdog() {
+		lastCurrentTime = video.currentTime;
+		stallTimer = setInterval(() => {
+			if (state === 'error') return;
+			const advanced = video.currentTime > lastCurrentTime + 0.05;
+			lastCurrentTime = video.currentTime;
+			if (!advanced && !video.paused) {
+				setStatus('connecting');
+			} else if (advanced && state !== 'playing') {
+				setStatus('online');
+			}
+		}, 4000);
+	}
+
 	onMount(async () => {
 		state = 'loading';
 		if (!src) {
@@ -84,6 +109,13 @@
 			}
 			video.addEventListener('playing', () => setStatus('online'));
 			video.addEventListener('waiting', () => setStatus('connecting'));
+			video.addEventListener(
+				'playing',
+				() => {
+					if (!stallTimer) startStallWatchdog();
+				},
+				{ once: true }
+			);
 		} catch (err) {
 			errorMsg = (err as Error).message;
 			setStatus('error');
@@ -94,6 +126,7 @@
 	onDestroy(() => {
 		hls?.destroy();
 		hls = null;
+		if (stallTimer) clearInterval(stallTimer);
 	});
 </script>
 
